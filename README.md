@@ -484,6 +484,15 @@ cue transitions and exposes a one-line `Summary` (active ability, frame,
 tags) for Inspector monitoring while tuning. `ActiveFrame`, `ActiveTags`,
 and `AbilityInstance.RegisteredHitCount` support custom tooling.
 
+`AbilityDebugDraw` is the Unreal-style draw-debug layer: timed wireframe
+boxes, spheres, and capsules rendered in the Scene and Game views through
+`Debug.DrawLine`, compiled out of player builds. Call it from game code for
+one-off shapes, or attach `DebugDrawEffectDefinition` to an ability timeline
+(shape, color, and screen lifetime are authoring data) to visualize a damage
+query volume at the exact frame it fires — for example, the same sphere as
+the melee effect on the damage frame, plus a tell-colored shape on an
+earlier frame.
+
 Multiplayer stays out of scope, but the seams exist: assign an
 `IAbilityReplicationSink` to forward activations, cues, and endings to the
 netcode layer. Animation clips can also emit cues without code through
@@ -505,6 +514,17 @@ Do these now, in this order:
   parries are reactions, not guesses.
 - Fire a manual cue on successful parries (`TriggerGameplayCue`) and present
   hit-stop, flash, or sound from the same presenter path.
+- Visualize enemy query volumes with timed debug-draw shapes
+  (`AbilityDebugDraw` / `DebugDrawEffectDefinition`): one trigger mirroring
+  the damage shape on the damage frame, one tell-colored shape on an earlier
+  frame. Done in the package; wire per enemy attack while tuning parries.
+- Suggested debug follow-ups, in value order: a timestamped per-actor ability
+  event log (started, cancelled with reason, whiffed, parried, cues) for
+  post-fight review; a hit-stop / slow-motion debug toggle for frame-level
+  tell inspection; damage numbers off the existing `Damaged` events; an
+  input-display overlay to correlate presses with activation rejections;
+  a manual-sequence inspector showing step, pending advance, and window
+  deadline for combo tuning.
 - Move per-actor combat numbers (Health, Poise, Stamina) toward the planned
   attribute sets instead of growing bespoke health components.
 - Pool cue VFX presenters instead of instantiating per trigger once combat
