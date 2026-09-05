@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Added ability-owned displacement: `AbilityDisplacementDirection`
+  (context, owner-forward, toward/away from target), distance plus a 1-based
+  frame window on `AbilityDefinition`, and kinematic `Rigidbody.MovePosition`
+  travel applied by `AbilitySystem` while the window is open. Direction and
+  body resolve once at activation; cancelling ends travel immediately.
+  Locomotion motors keep owning velocity — the ability only adds travel.
 - Added Unreal-style debug drawing: `AbilityDebugDraw` (timed wireframe
   box/sphere/capsule, editor-only, zero cost in builds) and
   `DebugDrawEffectDefinition` so abilities can visualize query volumes at any

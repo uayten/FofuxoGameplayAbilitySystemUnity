@@ -30,6 +30,16 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField, Min(0f)] private float cooldown;
         [SerializeField] private AbilityCooldownStartPolicy cooldownStartPolicy;
 
+        [Header("Displacement")]
+        [Tooltip("Where the travel direction is read at activation. Context uses the activation context direction (rolls and dashes).")]
+        [SerializeField] private AbilityDisplacementDirection displacementDirection;
+        [Tooltip("Meters travelled over the displacement window. Zero disables displacement.")]
+        [SerializeField, Min(0f)] private float displacementDistance;
+        [Tooltip("First 1-based timeline frame that moves the owner.")]
+        [SerializeField, Min(1)] private int displacementStartFrame = 1;
+        [Tooltip("Last 1-based timeline frame that moves the owner. Must be greater than the start frame.")]
+        [SerializeField, Min(1)] private int displacementEndFrame = 1;
+
         [Header("Costs and Charges")]
         [SerializeField] private AbilityCost[] costs = { };
         [Tooltip("Charges available before the restore timer refills them. Zero means unlimited.")]
@@ -70,6 +80,17 @@ namespace Fofuxo.GameplayAbilitySystem
         public float Duration => RecoveryEndFrame / FrameRate;
         public float Cooldown => Mathf.Max(0f, cooldown);
         public AbilityCooldownStartPolicy CooldownStartPolicy => cooldownStartPolicy;
+        public bool HasDisplacement => displacementDistance > Mathf.Epsilon;
+        public AbilityDisplacementDirection DisplacementDirection => displacementDirection;
+        public float DisplacementDistance => Mathf.Max(0f, displacementDistance);
+        public int DisplacementStartFrame => Mathf.Max(1, displacementStartFrame);
+        public int DisplacementEndFrame => Mathf.Max(1, displacementEndFrame);
+        public float DisplacementDurationSeconds => HasDisplacement
+            ? AbilityDisplacement.WindowDurationSeconds(
+                DisplacementStartFrame,
+                DisplacementEndFrame,
+                FrameRate)
+            : 0f;
         public IReadOnlyList<AbilityCost> Costs => costs;
         public int MaxCharges => Mathf.Max(0, maxCharges);
         public float ChargeRestoreTime => Mathf.Max(0f, chargeRestoreTime);
@@ -142,6 +163,21 @@ namespace Fofuxo.GameplayAbilitySystem
                 return false;
             }
 
+            if (HasDisplacement)
+            {
+                if (DisplacementEndFrame <= DisplacementStartFrame)
+                {
+                    error = "Displacement end frame must be greater than the displacement start frame.";
+                    return false;
+                }
+
+                if (DisplacementEndFrame > RecoveryEndFrame)
+                {
+                    error = "Displacement end frame is outside the ability timeline.";
+                    return false;
+                }
+            }
+
             for (int i = 0; i < effectTriggers.Length; i++)
             {
                 AbilityEffectTrigger trigger = effectTriggers[i];
@@ -191,6 +227,31 @@ namespace Fofuxo.GameplayAbilitySystem
             maxCharges = Mathf.Max(0, maxCharges);
             chargeRestoreTime = Mathf.Max(0f, chargeRestoreTime);
             baseAiWeight = Mathf.Max(0f, baseAiWeight);
+            displacementDistance = Mathf.Max(0f, displacementDistance);
+            displacementStartFrame = Mathf.Max(1, displacementStartFrame);
+            displacementEndFrame = Mathf.Max(1, displacementEndFrame);
+        }
+
+        /// <summary>
+        /// Test seam: authoring data stays immutable at runtime, but EditMode
+        /// tests need invalid and valid displacement configurations that the
+        /// Inspector clamps away.
+        /// </summary>
+        internal void SetAbilityIdForTests(string id)
+        {
+            abilityId = id?.Trim();
+        }
+
+        internal void ConfigureDisplacementForTests(
+            AbilityDisplacementDirection direction,
+            float distance,
+            int startFrame,
+            int endFrame)
+        {
+            displacementDirection = direction;
+            displacementDistance = distance;
+            displacementStartFrame = startFrame;
+            displacementEndFrame = endFrame;
         }
     }
 }

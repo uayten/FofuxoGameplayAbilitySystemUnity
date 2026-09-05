@@ -138,6 +138,8 @@ namespace Fofuxo.GameplayAbilitySystem
                 AbilityPhaseChanged?.Invoke(activeInstance.Definition, activeInstance.CurrentPhase);
             }
 
+            ApplyActiveDisplacement(activeInstance, Time.deltaTime);
+
             if (completed)
             {
                 CompleteActiveAbility();
@@ -485,6 +487,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private bool ActivateInternal(AbilityDefinition ability, AbilityContext context)
         {
             activeInstance = new AbilityInstance(ability, context);
+            BeginInstanceDisplacement(activeInstance, ability, context);
             AddGrantedTags(ability);
             PayCosts(ability, context);
             ConsumeCharge(ability);
@@ -727,6 +730,65 @@ namespace Fofuxo.GameplayAbilitySystem
                     grantedTagCounts[tag] = count - 1;
                 }
             }
+        }
+
+        /// <summary>
+        /// Resolves the travel snapshot for one activation. Direction follows
+        /// the ability's displacement mode, the body is the owner's Rigidbody
+        /// (null when the owner has none, which silently disables travel).
+        /// </summary>
+        private static void BeginInstanceDisplacement(
+            AbilityInstance instance,
+            AbilityDefinition ability,
+            AbilityContext context)
+        {
+            if (instance == null || !ability.HasDisplacement)
+            {
+                return;
+            }
+
+            Vector3 direction = AbilityDisplacement.ResolveDirection(
+                ability.DisplacementDirection,
+                context);
+            Rigidbody body = context.Owner != null
+                ? context.Owner.GetComponent<Rigidbody>()
+                : null;
+            instance.BeginDisplacement(
+                direction,
+                body,
+                ability.DisplacementDistance,
+                ability.DisplacementDurationSeconds);
+        }
+
+        /// <summary>
+        /// Moves the owner through its displacement window. Travel is planar
+        /// and kinematic (MovePosition, like root motion): velocity is never
+        /// touched, and nothing is swept. Cancelling or completing the
+        /// ability discards the instance, which stops travel immediately.
+        /// </summary>
+        private static void ApplyActiveDisplacement(AbilityInstance instance, float deltaTime)
+        {
+            if (instance == null ||
+                !instance.HasActiveDisplacement ||
+                instance.DisplacementBody == null)
+            {
+                return;
+            }
+
+            int currentFrame = instance.CurrentFrame;
+            if (currentFrame < instance.Definition.DisplacementStartFrame ||
+                currentFrame > instance.Definition.DisplacementEndFrame)
+            {
+                return;
+            }
+
+            if (!instance.TickDisplacement(deltaTime, out Vector3 step))
+            {
+                return;
+            }
+
+            Rigidbody body = instance.DisplacementBody;
+            body.MovePosition(body.position + step);
         }
 
         private void PlayAbilityAnimation(AbilityDefinition ability)

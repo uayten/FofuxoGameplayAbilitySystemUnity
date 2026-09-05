@@ -8,6 +8,9 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly bool[] executedEffects;
         private readonly bool[] executedCues;
         private readonly HashSet<(int TriggerIndex, Object Receiver)> registeredHits = new();
+        private Vector3 displacementDirection;
+        private float displacementRemainingDistance;
+        private float displacementRemainingDuration;
 
         public AbilityInstance(AbilityDefinition definition, AbilityContext context)
         {
@@ -25,6 +28,12 @@ namespace Fofuxo.GameplayAbilitySystem
         public int CurrentFrame { get; private set; }
         public AbilityPhase CurrentPhase { get; private set; }
         public int RegisteredHitCount => registeredHits.Count;
+
+        public bool HasActiveDisplacement =>
+            displacementRemainingDistance > Mathf.Epsilon &&
+            displacementRemainingDuration > Mathf.Epsilon &&
+            displacementDirection.sqrMagnitude > Mathf.Epsilon;
+        public Rigidbody DisplacementBody { get; private set; }
 
         internal bool Tick(
             AbilitySystem abilitySystem,
@@ -68,6 +77,63 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             return ElapsedTime >= Definition.Duration;
+        }
+
+        /// <summary>
+        /// Snapshots the travel for this activation. Direction and body are
+        /// resolved once by the system; the window consumes at constant speed
+        /// (remaining distance over remaining duration), so hitches distribute
+        /// instead of teleporting.
+        /// </summary>
+        internal void BeginDisplacement(
+            Vector3 direction,
+            Rigidbody body,
+            float distance,
+            float duration)
+        {
+            displacementDirection = Vector3.ProjectOnPlane(direction, Vector3.up);
+            if (displacementDirection.sqrMagnitude <= Mathf.Epsilon)
+            {
+                displacementDirection = Vector3.zero;
+            }
+            else
+            {
+                displacementDirection.Normalize();
+            }
+
+            DisplacementBody = body;
+            displacementRemainingDistance = Mathf.Max(0f, distance);
+            displacementRemainingDuration = Mathf.Max(0f, duration);
+        }
+
+        /// <summary>
+        /// Consumes one tick of travel. Returns false when there is nothing
+        /// left to move this tick; the step never exceeds the remainder, so
+        /// the total travelled distance equals the configured distance.
+        /// </summary>
+        internal bool TickDisplacement(float deltaTime, out Vector3 step)
+        {
+            step = Vector3.zero;
+            if (!HasActiveDisplacement)
+            {
+                return false;
+            }
+
+            float tick = Mathf.Max(0f, deltaTime);
+            float speed = displacementRemainingDistance /
+                Mathf.Max(Mathf.Epsilon, displacementRemainingDuration);
+            float stepDistance = Mathf.Min(displacementRemainingDistance, speed * tick);
+            if (stepDistance <= Mathf.Epsilon)
+            {
+                return false;
+            }
+
+            displacementRemainingDistance -= stepDistance;
+            displacementRemainingDuration = Mathf.Max(
+                0f,
+                displacementRemainingDuration - tick);
+            step = displacementDirection * stepDistance;
+            return true;
         }
 
         public bool TryRegisterHit(int triggerIndex, Object receiver)

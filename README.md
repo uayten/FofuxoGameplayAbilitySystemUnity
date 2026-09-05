@@ -52,7 +52,8 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Box/capsule damage effects, shared target queries | Projectile and collider-window effects |
 | Attribute costs, charges, input buffering | Dynamic cooldowns and cost discounts |
 | Duration modifiers with stacking, regeneration | Infinite effects and effect specs |
-| Whiff events, animation-event cue bridge | Full ability-task graph |
+| Whiff events, animation-event cue bridge | Full ability-task graph (beyond displacement) |
+| Ability-owned displacement windows | |
 | Replication sink hooks, Invulnerable tag | Cue replication |
 | AbilitySystemDebugger readout | Runtime debugger window |
 
@@ -63,8 +64,10 @@ contributors do not mistake planned APIs for implemented behavior:
 - Sequences advance automatically when each step completes.
 - Effects execute at configured frames and are currently instant.
 - `MeleeDamageEffectDefinition` performs one sphere query per trigger.
-- The package does not own health, AI decision-making, character movement,
-  networking, prediction, or save data.
+- The package does not own health, AI decision-making, locomotion motors,
+  networking, prediction, or save data. Abilities may own kinematic
+  displacement windows (meters over frames); planar velocity stays with the
+  owner's motor.
 
 ## Requirements
 
@@ -206,8 +209,20 @@ if (abilitySystem.CanActivate(rollAbility, context, out string reason))
 `FromDirection` projects the vector onto the ground plane and falls back to the
 owner's forward when it is empty. Grant a tag such as `State.Rolling` on the
 ability so health and animation code can read invulnerability from the system,
-while displacement and hitbox control stay in game code subscribed to the
+set displacement distance and frame window on the asset for the travel itself,
+while hitbox control stays in game code subscribed to the
 ability lifecycle events.
+
+### Displacement
+
+Abilities such as rolls, dashes, and lunges own their travel as data:
+direction mode (`Context`, `OwnerForward`, `TowardTarget`, `AwayFromTarget`),
+distance in meters, and a 1-based frame window on the ability timeline.
+`AbilitySystem` resolves direction and `Rigidbody` once at activation and
+applies planar `MovePosition` travel at constant speed while the window is
+open; cancelling or completing the ability stops travel immediately. Travel
+is kinematic and unswept, like root motion: it never touches velocity, so
+the owner's motor should clear competing planar velocity at activation.
 
 ### Timeline
 
