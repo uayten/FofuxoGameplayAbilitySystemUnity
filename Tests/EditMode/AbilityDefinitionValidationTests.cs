@@ -39,6 +39,23 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
+        public void NullParryEffect_FailsValidation()
+        {
+            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            try
+            {
+                ability.SetAbilityIdForTests("test.parry");
+                ability.SetParryEffectsForTests(null, null);
+                Assert.IsFalse(ability.TryValidate(out string error));
+                Assert.IsTrue(error.Contains("Parry"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
         public void DefaultCancelMask_AllowsEveryReason()
         {
             AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();

@@ -65,6 +65,15 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public static Func<GameObject> GlobalFallbackTargetResolver { get; set; }
 
+        /// <summary>
+        /// Fires for named bindings with neither ability nor sequence: the
+        /// router owns the keybind (enable + performed) while the game owner
+        /// keeps its activation logic (combos, buffers, guards). This keeps
+        /// every combat keybind in one component. The string is the binding's
+        /// action name.
+        /// </summary>
+        public event Action<string> ForwardedInput;
+
         private void Awake()
         {
             abilitySystem = GetComponent<AbilitySystem>();
@@ -91,9 +100,7 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 foreach (AbilityNamedInputBinding binding in namedBindings)
                 {
-                    if (binding == null ||
-                        string.IsNullOrWhiteSpace(binding.ActionName) ||
-                        (binding.Ability == null && binding.Sequence == null))
+                    if (binding == null || string.IsNullOrWhiteSpace(binding.ActionName))
                     {
                         continue;
                     }
@@ -182,6 +189,12 @@ namespace Fofuxo.GameplayAbilitySystem
             if (namedLookup.TryGetValue(inputContext.action, out AbilityNamedInputBinding namedBinding) &&
                 namedBinding != null)
             {
+                if (namedBinding.Ability == null && namedBinding.Sequence == null)
+                {
+                    ForwardedInput?.Invoke(namedBinding.ActionName);
+                    return;
+                }
+
                 TryActivateBinding(namedBinding.Ability, namedBinding.Sequence);
             }
         }

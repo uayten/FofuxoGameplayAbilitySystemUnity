@@ -56,6 +56,8 @@ namespace Fofuxo.GameplayAbilitySystem
 
         [Header("Effects")]
         [SerializeField] private AbilityEffectTrigger[] effectTriggers = { };
+        [Tooltip("Reactive rewards applied to the owner on a successful parry while this ability is active (e.g. the block heal). The numbers live here, not in components.")]
+        [SerializeField] private AbilityEffectDefinition[] onParryEffects = { };
 
         [Header("Gameplay Cues")]
         [SerializeField] private GameplayCueTrigger[] cueTriggers = { };
@@ -100,6 +102,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<GameplayTag> BlockedTags => blockedTags;
         public IReadOnlyList<GameplayTag> GrantedTags => grantedTags;
         public IReadOnlyList<AbilityEffectTrigger> EffectTriggers => effectTriggers;
+        public IReadOnlyList<AbilityEffectDefinition> OnParryEffects => onParryEffects;
         public IReadOnlyList<GameplayCueTrigger> CueTriggers => cueTriggers;
         public float BaseAiWeight => Mathf.Max(0f, baseAiWeight);
 
@@ -194,6 +197,15 @@ namespace Fofuxo.GameplayAbilitySystem
                 }
             }
 
+            for (int i = 0; i < onParryEffects.Length; i++)
+            {
+                if (onParryEffects[i] == null)
+                {
+                    error = $"Parry effect {i + 1} has no effect assigned.";
+                    return false;
+                }
+            }
+
             for (int i = 0; i < cueTriggers.Length; i++)
             {
                 GameplayCueTrigger cueTrigger = cueTriggers[i];
@@ -237,6 +249,11 @@ namespace Fofuxo.GameplayAbilitySystem
         /// tests need invalid and valid displacement configurations that the
         /// Inspector clamps away.
         /// </summary>
+        internal void SetParryEffectsForTests(params AbilityEffectDefinition[] effects)
+        {
+            onParryEffects = effects ?? System.Array.Empty<AbilityEffectDefinition>();
+        }
+
         internal void SetAbilityIdForTests(string id)
         {
             abilityId = id?.Trim();

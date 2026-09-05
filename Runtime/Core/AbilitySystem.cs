@@ -373,6 +373,24 @@ namespace Fofuxo.GameplayAbilitySystem
             ReplicationSink?.OnGameplayCue(cue, context);
         }
 
+        /// <summary>
+        /// Applies a reactive effect outside the timeline (parry rewards,
+        /// cleanses). Runs with an ephemeral instance of the source ability,
+        /// so hit-dedup and scaling resolve exactly like triggered effects.
+        /// </summary>
+        public void ApplyReactiveEffect(
+            AbilityEffectDefinition effect,
+            AbilityDefinition source,
+            AbilityContext context)
+        {
+            if (effect == null || source == null)
+            {
+                return;
+            }
+
+            effect.Apply(new AbilityEffectContext(this, new AbilityInstance(source, context), -1));
+        }
+
         private bool CanActivateInternal(
             AbilityDefinition ability,
             AbilityContext context,

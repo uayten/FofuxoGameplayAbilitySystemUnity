@@ -126,6 +126,30 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             return effect;
         }
 
+        [Test]
+        public void ApplyReactiveEffect_HealsOwner_ThroughSystem()
+        {
+            GameObject owner = NewOwner();
+            AttributeSet set = owner.AddComponent<AttributeSet>();
+            set.SetInitialValues(new[]
+            {
+                new AttributeSet.InitialValue(Health, 40f, 0f, 100f),
+            });
+            ModifyAttributeEffectDefinition effect = NewEffect();
+            SetEffect(effect, "applyToTarget", false);
+            SetEffect(effect, "attribute", Health);
+            SetEffect(effect, "operation", AttributeOperation.Add);
+            SetEffect(effect, "magnitude", 10f);
+            AbilityDefinition source = ScriptableObject.CreateInstance<AbilityDefinition>();
+            owned.Add(source);
+
+            AbilitySystem system = owner.GetComponent<AbilitySystem>();
+            system.ApplyReactiveEffect(
+                effect, source, AbilityContext.FromTarget(owner, owner));
+
+            Assert.AreEqual(50f, set.GetCurrent(Health));
+        }
+
         private void Apply(GameObject owner, GameObject target, ModifyAttributeEffectDefinition effect)
         {
             AbilitySystem system = owner.GetComponent<AbilitySystem>();
