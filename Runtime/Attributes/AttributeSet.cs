@@ -267,6 +267,59 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
+        /// Externally removes active duration and periodic modifiers, e.g. for
+        /// cleanse or stun-break effects. Matches attribute, and source when
+        /// one is provided (a null source matches any source). Duration
+        /// modifiers detach from the value exactly like on expiry, firing
+        /// <see cref="Changed"/> when the current value moves. Periodic
+        /// entries only stop future ticks: applied ticks already folded into
+        /// the base value and are never refunded.
+        /// </summary>
+        /// <returns>Number of active entries removed.</returns>
+        public int RemoveModifiers(GameplayAttribute attribute, UnityEngine.Object source = null)
+        {
+            if (attribute.IsEmpty)
+            {
+                return 0;
+            }
+
+            int removed = 0;
+            for (int i = durationEntries.Count - 1; i >= 0; i--)
+            {
+                DurationEntry entry = durationEntries[i];
+                if (entry.Modifier.Attribute != attribute)
+                {
+                    continue;
+                }
+
+                if (source != null && entry.Modifier.Source != source)
+                {
+                    continue;
+                }
+
+                durationEntries.RemoveAt(i);
+                removed++;
+
+                if (entry.IsPeriodic)
+                {
+                    continue;
+                }
+
+                AttributeValue value = GetOrCreate(entry.Modifier.Attribute);
+                float oldValue = value.CurrentValue;
+                value.RemoveModifier(entry.Modifier);
+                float newValue = value.CurrentValue;
+                if (!Mathf.Approximately(oldValue, newValue))
+                {
+                    Changed?.Invoke(new AttributeValueChanged(
+                        entry.Modifier.Attribute, oldValue, newValue, entry.Modifier.Source));
+                }
+            }
+
+            return removed;
+        }
+
+        /// <summary>
         /// Advances regeneration and duration expiry. Called automatically;
         /// public so tests can step time deterministically.
         /// </summary>
