@@ -20,6 +20,8 @@ namespace Fofuxo.GameplayAbilitySystem
         private AbilitySequenceDefinition activeSequence;
         private AbilityContext activeSequenceContext;
         private int activeSequenceStep;
+        private bool awaitingManualAdvance;
+        private float manualAdvanceDeadline;
 
         public AbilityDefinition ActiveAbility => activeInstance?.Definition;
         public AbilitySequenceDefinition ActiveSequence => activeSequence;
@@ -33,6 +35,11 @@ namespace Fofuxo.GameplayAbilitySystem
         public event Action<AbilityDefinition, AbilityCancelReason> AbilityCancelled;
         public event Action<AbilitySequenceDefinition> SequenceCompleted;
         public event Action<AbilitySequenceDefinition, AbilityCancelReason> SequenceCancelled;
+        /// <summary>
+        /// Fires when a manual sequence finishes a step and waits for
+        /// <see cref="TryAdvanceSequence"/> before running the next one.
+        /// </summary>
+        public event Action<AbilitySequenceDefinition, int> SequenceAwaitingAdvance;
         /// <summary>
         /// Fires for cosmetic cues only. Game code presents them as VFX, SFX,
         /// or UI and must never change gameplay state in response.
@@ -51,6 +58,14 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             if (activeInstance == null)
             {
+                if (awaitingManualAdvance &&
+                    activeSequence != null &&
+                    activeSequence.ManualAdvanceWindow > 0f &&
+                    Time.time > manualAdvanceDeadline)
+                {
+                    CancelSequenceOnly(AbilityCancelReason.Manual);
+                }
+
                 return;
             }
 
@@ -104,6 +119,10 @@ namespace Fofuxo.GameplayAbilitySystem
             if (activeInstance != null)
             {
                 CancelActiveAbilityInternal(AbilityCancelReason.Manual);
+            }
+            else if (activeSequence != null)
+            {
+                CancelSequenceOnly(AbilityCancelReason.Manual);
             }
 
             looseTags.Clear();
@@ -208,6 +227,62 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
+        /// <summary>
+        /// Advances a manual sequence waiting after a completed step. Each
+        /// call runs one step, so player combos can require one input per hit.
+        /// </summary>
+        public bool TryAdvanceSequence()
+        {
+            if (activeSequence == null ||
+                !awaitingManualAdvance ||
+                activeInstance != null ||
+                activeSequenceStep < 0 ||
+                activeSequenceStep >= activeSequence.Steps.Count)
+            {
+                return false;
+            }
+
+            if (activeSequence.ManualAdvanceWindow > 0f &&
+                Time.time > manualAdvanceDeadline)
+            {
+                CancelSequenceOnly(AbilityCancelReason.Manual);
+                return false;
+            }
+
+            AbilityDefinition nextStep = activeSequence.Steps[activeSequenceStep];
+            awaitingManualAdvance = false;
+            if (CanActivateInternal(nextStep, activeSequenceContext, true, out _) &&
+                ActivateInternal(nextStep, activeSequenceContext))
+            {
+                return true;
+            }
+
+            CancelSequenceOnly(AbilityCancelReason.Manual);
+            return false;
+        }
+
+        /// <summary>
+        /// Cancels the active ability or a sequence waiting for manual advance.
+        /// </summary>
+        public bool TryCancelSequence(AbilityCancelReason reason)
+        {
+            if (activeInstance != null)
+            {
+                return TryCancelActiveAbility(reason);
+            }
+
+            if (activeSequence != null)
+            {
+                CancelSequenceOnly(reason);
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool IsAwaitingSequenceAdvance =>
+            activeSequence != null && awaitingManualAdvance && activeInstance == null;
+
         public bool IsOnCooldown(AbilityDefinition ability)
         {
             return ability != null &&
@@ -285,6 +360,12 @@ namespace Fofuxo.GameplayAbilitySystem
             if (activeInstance != null)
             {
                 rejectionReason = "Another ability is active.";
+                return false;
+            }
+
+            if (!isSequenceStep && IsAwaitingSequenceAdvance)
+            {
+                rejectionReason = "A sequence is waiting for manual advance.";
                 return false;
             }
 
@@ -390,6 +471,16 @@ namespace Fofuxo.GameplayAbilitySystem
             activeSequenceStep++;
             if (activeSequenceStep < activeSequence.Steps.Count)
             {
+                if (activeSequence.Advancement == SequenceAdvancement.Manual)
+                {
+                    awaitingManualAdvance = true;
+                    manualAdvanceDeadline = activeSequence.ManualAdvanceWindow > 0f
+                        ? Time.time + activeSequence.ManualAdvanceWindow
+                        : float.PositiveInfinity;
+                    SequenceAwaitingAdvance?.Invoke(activeSequence, activeSequenceStep);
+                    return;
+                }
+
                 AbilityDefinition nextStep = activeSequence.Steps[activeSequenceStep];
                 if (CanActivateInternal(nextStep, activeSequenceContext, true, out _) &&
                     ActivateInternal(nextStep, activeSequenceContext))
@@ -437,6 +528,8 @@ namespace Fofuxo.GameplayAbilitySystem
             activeSequence = null;
             activeSequenceContext = default;
             activeSequenceStep = 0;
+            awaitingManualAdvance = false;
+            manualAdvanceDeadline = 0f;
         }
 
         private void StartCooldown(AbilityDefinition ability)

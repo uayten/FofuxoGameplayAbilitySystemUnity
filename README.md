@@ -47,6 +47,8 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Sphere-based melee damage effect | Additional targeting and hit shapes |
 | Lifecycle events and cancellation reasons | Runtime debugger and active-effect inspector |
 | Frame-based gameplay cues | Cue replication |
+| Attributes: identifiers, sets, instant modifiers | Duration/infinite effects and stacking |
+| Manual sequence advancement (one input per step) | Input buffering and continuation windows |
 
 Current limitations are intentional and documented so consumers and
 contributors do not mistake planned APIs for implemented behavior:
@@ -367,9 +369,15 @@ framework without changing ability execution.
 
 ## Planned Attributes system
 
-Attributes are the next major runtime subsystem. The design will stay smaller
+Attributes are the next major runtime subsystem. The design stays smaller
 than Unreal GAS while preserving its most useful separation between authoring
 data, per-actor state, and effect execution.
+
+Shipped as a first slice: `GameplayAttribute` identifiers, `AttributeSet`
+components with authored initial values, instant `AttributeModifier`
+application (`Add`/`Multiply`/`Override` with deterministic aggregation and
+limits), and typed `AttributeValueChanged` events. Duration/infinite effects,
+stacking, and specs remain planned below.
 
 ### Proposed types
 
@@ -460,8 +468,9 @@ Deliberately later:
 
 - Ability tasks for waits, animation events, and async movement (Phase 6),
   which subsume hand-rolled buffering and facing-wait code in callers.
-- Input buffering and explicit sequence advancement in the router (Phase 2),
-  once player combos require one input per step.
+- Input buffering and continuation windows (Phase 2). Explicit per-step
+  advancement already exists (`SequenceAdvancement.Manual`); the player combo
+  migration is next.
 - Duration/infinite effects with stacking (Phase 5) for burns, guards, and
   buffs; costs and cooldowns can migrate onto them afterward.
 - A runtime debugger showing the active ability, frame, tags, cooldowns, and

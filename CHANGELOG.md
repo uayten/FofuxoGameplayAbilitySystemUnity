@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Added the Attributes subsystem (`GameplayAttribute`, `AttributeModifier`,
+  `AttributeValue`, `AttributeSet`) with deterministic Add/Multiply/Override
+  aggregation, limits, and typed change events.
+- Added manual sequence advancement (`SequenceAdvancement.Manual`,
+  `TryAdvanceSequence`, `SequenceAwaitingAdvance`, `TryCancelSequence`) so
+  player combos can require one input per step.
 - Added frame-based gameplay cues (`GameplayCueTrigger` on `AbilityDefinition`,
   `AbilitySystem.GameplayCueTriggered`, and manual `TriggerGameplayCue`) for
   cosmetic tells such as enemy attack warnings.
