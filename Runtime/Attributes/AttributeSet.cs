@@ -81,6 +81,8 @@ namespace Fofuxo.GameplayAbilitySystem
             public float PerSecond => perSecond;
         }
 
+        [Tooltip("Shared savable defaults. When assigned, Rebuild uses it instead of the local arrays.")]
+        [SerializeField] private AttributeSetDefinition definition;
         [SerializeField] private InitialValue[] initialValues = { };
         [SerializeField] private Regeneration[] regeneration = { };
 
@@ -103,11 +105,21 @@ namespace Fofuxo.GameplayAbilitySystem
         /// Rebuilds runtime values from the authored initials. Used at startup
         /// and by tests that configure initials after construction.
         /// </summary>
+        /// <summary>
+        /// Points this set at shared savable defaults and rebuilds immediately.
+        /// </summary>
+        public void SetDefinition(AttributeSetDefinition setDefinition)
+        {
+            definition = setDefinition;
+            Rebuild();
+        }
+
         public void Rebuild()
         {
             values.Clear();
             durationEntries.Clear();
-            foreach (InitialValue initial in initialValues)
+            InitialValue[] initials = definition != null ? definition.InitialValues : initialValues;
+            foreach (InitialValue initial in initials)
             {
                 if (initial.Attribute.IsEmpty || values.ContainsKey(initial.Attribute))
                 {
@@ -331,7 +343,8 @@ namespace Fofuxo.GameplayAbilitySystem
                 return;
             }
 
-            foreach (Regeneration entry in regeneration)
+            Regeneration[] regen = definition != null ? definition.Regeneration : regeneration;
+            foreach (Regeneration entry in regen)
             {
                 if (entry.Attribute.IsEmpty || Mathf.Approximately(entry.PerSecond, 0f))
                 {
