@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Added `AbilityContext.FromDirection` for directional, targetless abilities
+  such as rolls and dashes, with ground-plane projection and owner-forward
+  fallback.
 - Added `AbilitySystem.CanActivateSequence` so AI and other callers can score
   granted sequences without starting them.
 - Expanded the README with current capabilities, limitations, architecture,

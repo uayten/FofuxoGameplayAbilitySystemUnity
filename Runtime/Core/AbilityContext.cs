@@ -35,5 +35,28 @@ namespace Fofuxo.GameplayAbilitySystem
                     : direction;
             return new AbilityContext(owner, target, direction, aimPoint);
         }
+
+        /// <summary>
+        /// Builds a context for directional, targetless abilities such as rolls,
+        /// dashes, or lunges. The supplied direction is projected onto the ground
+        /// plane; when it is empty, the owner's forward is used instead so the
+        /// context always carries a usable facing.
+        /// </summary>
+        public static AbilityContext FromDirection(
+            GameObject owner,
+            GameObject target,
+            Vector3 direction)
+        {
+            Vector3 planarDirection = Vector3.ProjectOnPlane(direction, Vector3.up);
+            if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
+            {
+                planarDirection = owner != null ? owner.transform.forward : Vector3.forward;
+            }
+
+            Vector3 aimPoint = owner != null
+                ? owner.transform.position + planarDirection.normalized
+                : planarDirection.normalized;
+            return new AbilityContext(owner, target, planarDirection, aimPoint);
+        }
     }
 }

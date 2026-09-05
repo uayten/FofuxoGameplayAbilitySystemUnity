@@ -180,6 +180,25 @@ An effect may have a different physical query volume. For melee effects, make
 sure the activation range and effect reach overlap; otherwise an AI can stop at
 a valid activation distance while the hit query still cannot reach the target.
 
+Directional, targetless abilities such as rolls or dashes set
+`Requires Target` to `false` and carry their facing explicitly:
+
+```csharp
+Vector3 rollDirection = GetRollDirection(); // game-specific facing logic
+AbilityContext context = AbilityContext.FromDirection(gameObject, null, rollDirection);
+
+if (abilitySystem.CanActivate(rollAbility, context, out string reason))
+{
+    abilitySystem.TryActivate(rollAbility, context);
+}
+```
+
+`FromDirection` projects the vector onto the ground plane and falls back to the
+owner's forward when it is empty. Grant a tag such as `State.Rolling` on the
+ability so health and animation code can read invulnerability from the system,
+while displacement and hitbox control stay in game code subscribed to the
+ability lifecycle events.
+
 ### Timeline
 
 The timeline uses one-based frames:
