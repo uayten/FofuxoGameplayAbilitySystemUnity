@@ -19,6 +19,7 @@ Gameplay Ability System.
 - [How it works](#how-it-works)
 - [Authoring an ability](#authoring-an-ability)
 - [Effects and damage](#effects-and-damage)
+- [Gameplay cues](#gameplay-cues)
 - [Sequences](#sequences)
 - [Input](#input)
 - [AI integration](#ai-integration)
@@ -45,6 +46,7 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Input System routing | Ability tasks and movement policies |
 | Sphere-based melee damage effect | Additional targeting and hit shapes |
 | Lifecycle events and cancellation reasons | Runtime debugger and active-effect inspector |
+| Frame-based gameplay cues | Cue replication |
 
 Current limitations are intentional and documented so consumers and
 contributors do not mistake planned APIs for implemented behavior:
@@ -276,6 +278,38 @@ public sealed class MyHealth : MonoBehaviour, IAbilityDamageReceiver
 }
 ```
 
+## Gameplay cues
+
+Yes — this is the Unreal GameplayCue concept translated to a local,
+single-player package. In Unreal, abilities and effects trigger cue tags that
+the `GameplayCueManager` executes as cosmetics (particles, sounds, camera
+shakes) on owning clients and simulated proxies. Here there is no replication
+or central manager: an ability author places `GameplayCueTrigger` entries
+(frame + cue tag) on the `AbilityDefinition`, the `AbilitySystem` raises
+`GameplayCueTriggered` while ticking, and game-side presenters turn tags into
+VFX/SFX. Cues never change gameplay state.
+
+```csharp
+// React to cues from game code (for example, a per-actor presenter).
+abilitySystem.GameplayCueTriggered += (ability, cue, context) =>
+{
+    if (cue == new GameplayTag("Cue.EnemyAttackTell"))
+    {
+        SpawnTellEffect(context.Owner);
+    }
+};
+
+// Or fire one manually, outside any ability (AI tell, successful parry).
+abilitySystem.TriggerGameplayCue(
+    new GameplayTag("Cue.ParrySuccess"),
+    AbilityContext.FromTarget(gameObject, target));
+```
+
+Typical parry-tell setup: the enemy attack ability carries a cue trigger about
+half a second before its damage frame (for example, tell at frame 25 when the
+hit lands at frame 52 on a 60 fps timeline). The player's parry window then
+becomes a reaction test instead of a guess.
+
 ## Sequences
 
 `AbilitySequenceDefinition` groups ordered steps and an optional sequence-level
@@ -402,6 +436,38 @@ Cooldowns and costs can later become specialized gameplay effects, but they will
 remain explicit fields until the generic effect lifecycle is proven.
 
 ## Roadmap
+
+### Suggested next steps (from BossRush use)
+
+Do these now, in this order:
+
+- Keep the granted ability tag as the single source of truth for
+  ability-driven states, with callers owning input intent and physics
+  following the ability. BossRush already does this for `State.Rolling`:
+  the roll starts only through `grant.roll`, and `IsRolling` derives from
+  the active ability.
+- Author a `Cue.EnemyAttackTell` trigger on every enemy attack ability, about
+  half a second before the damage frame, and present it from game code so
+  parries are reactions, not guesses.
+- Fire a manual cue on successful parries (`TriggerGameplayCue`) and present
+  hit-stop, flash, or sound from the same presenter path.
+- Move per-actor combat numbers (Health, Poise, Stamina) toward the planned
+  attribute sets instead of growing bespoke health components.
+- Pool cue VFX presenters instead of instantiating per trigger once combat
+  density grows.
+
+Deliberately later:
+
+- Ability tasks for waits, animation events, and async movement (Phase 6),
+  which subsume hand-rolled buffering and facing-wait code in callers.
+- Input buffering and explicit sequence advancement in the router (Phase 2),
+  once player combos require one input per step.
+- Duration/infinite effects with stacking (Phase 5) for burns, guards, and
+  buffs; costs and cooldowns can migrate onto them afterward.
+- A runtime debugger showing the active ability, frame, tags, cooldowns, and
+  recent cues (Phase 7) — the fastest way to tune tell timing.
+- Cue replication hooks and prediction-safe effect execution only if
+  multiplayer stops being hypothetical.
 
 ### Phase 1 — Stabilize the current core
 

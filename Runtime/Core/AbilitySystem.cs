@@ -14,6 +14,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly Dictionary<AbilitySequenceDefinition, float> sequenceCooldownEndTimes = new();
         private readonly Dictionary<GameplayTag, int> grantedTagCounts = new();
         private readonly HashSet<GameplayTag> looseTags = new();
+        private readonly List<GameplayTag> firedCues = new();
 
         private AbilityInstance activeInstance;
         private AbilitySequenceDefinition activeSequence;
@@ -32,6 +33,11 @@ namespace Fofuxo.GameplayAbilitySystem
         public event Action<AbilityDefinition, AbilityCancelReason> AbilityCancelled;
         public event Action<AbilitySequenceDefinition> SequenceCompleted;
         public event Action<AbilitySequenceDefinition, AbilityCancelReason> SequenceCancelled;
+        /// <summary>
+        /// Fires for cosmetic cues only. Game code presents them as VFX, SFX,
+        /// or UI and must never change gameplay state in response.
+        /// </summary>
+        public event Action<AbilityDefinition, GameplayTag, AbilityContext> GameplayCueTriggered;
 
         private void Awake()
         {
@@ -57,9 +63,10 @@ namespace Fofuxo.GameplayAbilitySystem
             AbilityInstance instanceAtStart = activeInstance;
             bool completed;
             AbilityPhase previousPhase;
+            firedCues.Clear();
             try
             {
-                completed = activeInstance.Tick(this, Time.deltaTime, out previousPhase);
+                completed = activeInstance.Tick(this, Time.deltaTime, out previousPhase, firedCues);
             }
             catch (Exception exception)
             {
@@ -71,6 +78,14 @@ namespace Fofuxo.GameplayAbilitySystem
             if (activeInstance != instanceAtStart)
             {
                 return;
+            }
+
+            for (int i = 0; i < firedCues.Count; i++)
+            {
+                GameplayCueTriggered?.Invoke(
+                    activeInstance.Definition,
+                    firedCues[i],
+                    activeInstance.Context);
             }
 
             if (previousPhase != activeInstance.CurrentPhase)
@@ -234,6 +249,20 @@ namespace Fofuxo.GameplayAbilitySystem
         public AbilityDefinition FindAbility(string abilityId)
         {
             return loadout != null ? loadout.FindAbility(abilityId) : null;
+        }
+
+        /// <summary>
+        /// Fires a cosmetic cue outside the ability timeline, for example an
+        /// AI tell or a successful parry. Empty tags are ignored.
+        /// </summary>
+        public void TriggerGameplayCue(GameplayTag cue, AbilityContext context)
+        {
+            if (cue.IsEmpty)
+            {
+                return;
+            }
+
+            GameplayCueTriggered?.Invoke(activeInstance?.Definition, cue, context);
         }
 
         private bool CanActivateInternal(

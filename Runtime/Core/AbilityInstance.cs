@@ -6,6 +6,7 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class AbilityInstance
     {
         private readonly bool[] executedEffects;
+        private readonly bool[] executedCues;
         private readonly HashSet<(int TriggerIndex, Object Receiver)> registeredHits = new();
 
         public AbilityInstance(AbilityDefinition definition, AbilityContext context)
@@ -13,6 +14,7 @@ namespace Fofuxo.GameplayAbilitySystem
             Definition = definition;
             Context = context;
             executedEffects = new bool[definition.EffectTriggers.Count];
+            executedCues = new bool[definition.CueTriggers.Count];
             CurrentFrame = 0;
             CurrentPhase = definition.GetPhase(0);
         }
@@ -26,7 +28,8 @@ namespace Fofuxo.GameplayAbilitySystem
         internal bool Tick(
             AbilitySystem abilitySystem,
             float deltaTime,
-            out AbilityPhase previousPhase)
+            out AbilityPhase previousPhase,
+            List<GameplayTag> firedCues)
         {
             previousPhase = CurrentPhase;
             ElapsedTime += Mathf.Max(0f, deltaTime);
@@ -46,6 +49,21 @@ namespace Fofuxo.GameplayAbilitySystem
 
                 executedEffects[i] = true;
                 trigger.Effect?.Apply(new AbilityEffectContext(abilitySystem, this, i));
+            }
+
+            for (int i = 0; i < Definition.CueTriggers.Count; i++)
+            {
+                GameplayCueTrigger cueTrigger = Definition.CueTriggers[i];
+                if (executedCues[i] || cueTrigger.Frame > CurrentFrame)
+                {
+                    continue;
+                }
+
+                executedCues[i] = true;
+                if (!cueTrigger.Cue.IsEmpty)
+                {
+                    firedCues?.Add(cueTrigger.Cue);
+                }
             }
 
             return ElapsedTime >= Definition.Duration;

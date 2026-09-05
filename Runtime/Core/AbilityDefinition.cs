@@ -40,6 +40,9 @@ namespace Fofuxo.GameplayAbilitySystem
         [Header("Effects")]
         [SerializeField] private AbilityEffectTrigger[] effectTriggers = { };
 
+        [Header("Gameplay Cues")]
+        [SerializeField] private GameplayCueTrigger[] cueTriggers = { };
+
         [Header("AI")]
         [SerializeField, Min(0f)] private float baseAiWeight = 1f;
 
@@ -65,6 +68,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<GameplayTag> BlockedTags => blockedTags;
         public IReadOnlyList<GameplayTag> GrantedTags => grantedTags;
         public IReadOnlyList<AbilityEffectTrigger> EffectTriggers => effectTriggers;
+        public IReadOnlyList<GameplayCueTrigger> CueTriggers => cueTriggers;
         public float BaseAiWeight => Mathf.Max(0f, baseAiWeight);
 
         public AbilityPhase GetPhase(int currentFrame)
@@ -117,6 +121,22 @@ namespace Fofuxo.GameplayAbilitySystem
                 if (trigger.Frame > RecoveryEndFrame)
                 {
                     error = $"Effect trigger {i + 1} is outside the ability timeline.";
+                    return false;
+                }
+            }
+
+            for (int i = 0; i < cueTriggers.Length; i++)
+            {
+                GameplayCueTrigger cueTrigger = cueTriggers[i];
+                if (cueTrigger.Cue.IsEmpty)
+                {
+                    error = $"Gameplay cue trigger {i + 1} has no cue tag assigned.";
+                    return false;
+                }
+
+                if (cueTrigger.Frame > RecoveryEndFrame)
+                {
+                    error = $"Gameplay cue trigger {i + 1} is outside the ability timeline.";
                     return false;
                 }
             }

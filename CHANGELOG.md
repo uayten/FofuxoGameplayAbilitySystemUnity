@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Added frame-based gameplay cues (`GameplayCueTrigger` on `AbilityDefinition`,
+  `AbilitySystem.GameplayCueTriggered`, and manual `TriggerGameplayCue`) for
+  cosmetic tells such as enemy attack warnings.
 - Added `AbilityContext.FromDirection` for directional, targetless abilities
   such as rolls and dashes, with ground-plane projection and owner-forward
   fallback.
