@@ -391,6 +391,128 @@ namespace Fofuxo.GameplayAbilitySystem
             effect.Apply(new AbilityEffectContext(this, new AbilityInstance(source, context), -1));
         }
 
+        /// <summary>
+        /// Executes the nested ability of an activation: currently target
+        /// assist (query enemies around the context direction, snap the owner
+        /// toward the best one). Instant and tagless; the parent keeps owning
+        /// the timeline, cooldown, and animation.
+        /// </summary>
+        private static void RunNestedAssist(AbilityDefinition ability, AbilityContext context)
+        {
+            TargetAssistDefinition assist = ability.NestedAssist;
+            GameObject owner = context.Owner;
+            if (assist == null || owner == null)
+            {
+                return;
+            }
+
+            int layers = assist.TargetLayerMask;
+            if (layers == 0)
+            {
+                return;
+            }
+
+            float distance = assist.SearchDistance > 0f
+                ? assist.SearchDistance
+                : Mathf.Max(0f, ability.MaximumRange);
+            if (distance <= Mathf.Epsilon)
+            {
+                return;
+            }
+
+            float cone = Mathf.Min(
+                Mathf.Clamp(assist.ConeHalfAngle, 0f, 90f),
+                ability.MaximumFacingAngle);
+            Vector3 facing = context.Direction;
+            if (facing.sqrMagnitude <= Mathf.Epsilon)
+            {
+                facing = owner.transform.forward;
+            }
+
+            Collider[] candidates = new Collider[32];
+            int candidateCount = Physics.OverlapSphereNonAlloc(
+                owner.transform.position,
+                distance,
+                candidates,
+                layers,
+                QueryTriggerInteraction.Collide);
+
+            float bestScore = float.PositiveInfinity;
+            Vector3 bestDirection = Vector3.zero;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                Collider candidate = candidates[i];
+                if (candidate == null ||
+                    candidate.gameObject == owner ||
+                    candidate.transform.IsChildOf(owner.transform) ||
+                    !candidate.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                if (!TryGetAssistDirection(owner, candidate, out Vector3 candidateDirection, out float candidateDistance))
+                {
+                    continue;
+                }
+
+                if (candidate.GetComponentInParent<IAbilityDamageReceiver>() is not IAbilityDamageReceiver receiver ||
+                    !receiver.IsDamageable)
+                {
+                    continue;
+                }
+
+                float inputAngle = Vector3.Angle(facing, candidateDirection);
+                if (candidateDistance > assist.ProximityRadius && inputAngle > cone)
+                {
+                    continue;
+                }
+
+                float score = candidateDistance + inputAngle * 0.02f;
+                if (score >= bestScore)
+                {
+                    continue;
+                }
+
+                bestScore = score;
+                bestDirection = candidateDirection;
+            }
+
+            if (bestDirection.sqrMagnitude > Mathf.Epsilon)
+            {
+                owner.transform.rotation = Quaternion.LookRotation(bestDirection, Vector3.up);
+            }
+        }
+
+        private static bool TryGetAssistDirection(
+            GameObject owner,
+            Collider targetCollider,
+            out Vector3 targetDirection,
+            out float targetDistance)
+        {
+            targetDirection = Vector3.zero;
+            targetDistance = 0f;
+
+            Vector3 closestPoint = targetCollider.ClosestPoint(owner.transform.position);
+            Vector3 planarDirection = Vector3.ProjectOnPlane(
+                closestPoint - owner.transform.position,
+                Vector3.up);
+            if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
+            {
+                planarDirection = Vector3.ProjectOnPlane(
+                    targetCollider.bounds.center - owner.transform.position,
+                    Vector3.up);
+            }
+
+            if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
+            {
+                return false;
+            }
+
+            targetDistance = planarDirection.magnitude;
+            targetDirection = planarDirection / targetDistance;
+            return true;
+        }
+
         private bool CanActivateInternal(
             AbilityDefinition ability,
             AbilityContext context,
@@ -505,6 +627,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private bool ActivateInternal(AbilityDefinition ability, AbilityContext context)
         {
             activeInstance = new AbilityInstance(ability, context);
+            RunNestedAssist(ability, context);
             BeginInstanceDisplacement(activeInstance, ability, context);
             AddGrantedTags(ability);
             PayCosts(ability, context);

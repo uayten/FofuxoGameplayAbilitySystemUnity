@@ -24,7 +24,8 @@ namespace Fofuxo.GameplayAbilitySystem
             Vector3 knockback = default,
             float knockbackDuration = 0f,
             AbilityImpact impact = AbilityImpact.Light,
-            bool canBeParried = true)
+            bool canBeParried = true,
+            float stunDuration = 0f)
         {
             Amount = Mathf.Max(0, amount);
             Source = source;
@@ -36,6 +37,7 @@ namespace Fofuxo.GameplayAbilitySystem
             KnockbackDuration = Mathf.Max(0f, knockbackDuration);
             Impact = impact;
             CanBeParried = canBeParried;
+            StunDuration = Mathf.Max(0f, stunDuration);
         }
 
         public int Amount { get; }
@@ -54,6 +56,12 @@ namespace Fofuxo.GameplayAbilitySystem
         public float KnockbackDuration { get; }
         public AbilityImpact Impact { get; }
         public bool CanBeParried { get; }
+
+        /// <summary>
+        /// Control-lock duration, in seconds, the target should apply. Zero
+        /// means interrupt and displace only. Authored per attack.
+        /// </summary>
+        public float StunDuration { get; }
     }
 
     /// <summary>

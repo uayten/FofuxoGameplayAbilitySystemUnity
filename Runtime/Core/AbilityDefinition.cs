@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Fofuxo.GameplayAbilitySystem
 {
     [CreateAssetMenu(fileName = "Ability", menuName = "Fofuxo/Abilities/Ability")]
-    public sealed class AbilityDefinition : ScriptableObject
+    public class AbilityDefinition : ScriptableObject
     {
         [Header("Identity")]
         [SerializeField] private string abilityId;
@@ -58,6 +58,8 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AbilityEffectTrigger[] effectTriggers = { };
         [Tooltip("Reactive rewards applied to the owner on a successful parry while this ability is active (e.g. the block heal). The numbers live here, not in components.")]
         [SerializeField] private AbilityEffectDefinition[] onParryEffects = { };
+        [Tooltip("Nested ability executed on activation, before displacement and animation (e.g. target assist inside attacks). Runs without cooldown, costs, tags, or animation as part of this activation.")]
+        [SerializeField] private TargetAssistDefinition nestedAssist;
 
         [Header("Gameplay Cues")]
         [SerializeField] private GameplayCueTrigger[] cueTriggers = { };
@@ -103,6 +105,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<GameplayTag> GrantedTags => grantedTags;
         public IReadOnlyList<AbilityEffectTrigger> EffectTriggers => effectTriggers;
         public IReadOnlyList<AbilityEffectDefinition> OnParryEffects => onParryEffects;
+        public TargetAssistDefinition NestedAssist => nestedAssist;
         public IReadOnlyList<GameplayCueTrigger> CueTriggers => cueTriggers;
         public float BaseAiWeight => Mathf.Max(0f, baseAiWeight);
 
@@ -124,7 +127,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return (allowedCancellation & reasonMask) != 0;
         }
 
-        public bool TryValidate(out string error)
+        public virtual bool TryValidate(out string error)
         {
             if (string.IsNullOrWhiteSpace(AbilityId))
             {
@@ -206,6 +209,12 @@ namespace Fofuxo.GameplayAbilitySystem
                 }
             }
 
+            if (nestedAssist != null && !nestedAssist.TryValidate(out error))
+            {
+                error = "Nested assist is invalid: " + error;
+                return false;
+            }
+
             for (int i = 0; i < cueTriggers.Length; i++)
             {
                 GameplayCueTrigger cueTrigger = cueTriggers[i];
@@ -249,6 +258,11 @@ namespace Fofuxo.GameplayAbilitySystem
         /// tests need invalid and valid displacement configurations that the
         /// Inspector clamps away.
         /// </summary>
+        internal void SetNestedAssistForTests(TargetAssistDefinition assist)
+        {
+            nestedAssist = assist;
+        }
+
         internal void SetParryEffectsForTests(params AbilityEffectDefinition[] effects)
         {
             onParryEffects = effects ?? System.Array.Empty<AbilityEffectDefinition>();

@@ -18,6 +18,8 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private float verticalKnockback;
         [SerializeField, Min(0f)] private float knockbackDuration;
         [SerializeField] private AbilityImpact impact = AbilityImpact.Light;
+        [Tooltip("Control-lock applied on hit. Zero interrupts and displaces only.")]
+        [SerializeField, Min(0f)] private float stunDurationSeconds;
         [SerializeField] private bool canBeParried = true;
         [SerializeField, Min(1)] private int maximumTargets = 1;
         [Header("Attribute Scaling")]
@@ -77,7 +79,8 @@ namespace Fofuxo.GameplayAbilitySystem
                     knockback,
                     knockbackDuration,
                     impact,
-                    canBeParried);
+                    canBeParried,
+                    stunDurationSeconds);
 
                 if (receiver.TryReceiveDamage(hitInfo))
                 {
@@ -92,6 +95,7 @@ namespace Fofuxo.GameplayAbilitySystem
             damage = Mathf.Max(1, damage);
             horizontalKnockback = Mathf.Max(0f, horizontalKnockback);
             knockbackDuration = Mathf.Max(0f, knockbackDuration);
+            stunDurationSeconds = Mathf.Max(0f, stunDurationSeconds);
             maximumTargets = Mathf.Clamp(maximumTargets, 1, HitCapacity);
         }
     }
