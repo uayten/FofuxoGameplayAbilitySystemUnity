@@ -188,7 +188,14 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void TryActivateBinding(AbilityDefinition ability, AbilitySequenceDefinition sequence)
         {
-            GameObject target = ResolveTarget();
+            // Targetless abilities (rolls, self novas) declare RequiresTarget
+            // false precisely so no target is resolved for them: a fallback
+            // target would only subject them to a meaningless range gate.
+            // Sequences keep the fallback because their steps may need one.
+            GameObject target = sequence != null ||
+                (ability != null && ability.RequiresTarget)
+                ? ResolveTarget()
+                : null;
             AbilityContext context = AbilityContext.FromTarget(gameObject, target);
             bool activated = sequence != null
                 ? abilitySystem.TryActivateSequence(sequence, context)

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Router no longer resolves a fallback target for targetless single
+  abilities: `RequiresTarget` false means no target, so self novas never hit
+  a meaningless range gate. Sequences keep the fallback for their steps.
 - Added periodic modifiers (`ApplyPeriodicModifier` with Stack/Refresh/Ignore
   stacking) and `PeriodicAttributeEffectDefinition` for damage/heal over time:
   every period folds into the base value like an instant change, firing the
