@@ -218,6 +218,55 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
+        /// Applies a periodic modifier (damage or heal over time). Every
+        /// period the modifier is applied as an instant change to the base
+        /// value, exactly like Unreal's periodic gameplay effects. Stacking
+        /// matches on attribute, operation, and source.
+        /// Zero or negative durations behave as a single instant modifier;
+        /// zero or negative periods also collapse to one instant application.
+        /// </summary>
+        /// <returns>True when the modifier is (or stays) applied.</returns>
+        public bool ApplyPeriodicModifier(
+            AttributeModifier modifier,
+            float durationSeconds,
+            float periodSeconds,
+            EffectStacking stacking)
+        {
+            if (modifier.Attribute.IsEmpty)
+            {
+                return false;
+            }
+
+            if (durationSeconds <= 0f || periodSeconds <= 0f)
+            {
+                ApplyInstantModifier(modifier);
+                return true;
+            }
+
+            int existing = durationEntries.FindIndex(entry =>
+                entry.IsPeriodic &&
+                entry.Modifier.Attribute == modifier.Attribute &&
+                entry.Modifier.Operation == modifier.Operation &&
+                entry.Modifier.Source == modifier.Source);
+            if (existing >= 0)
+            {
+                switch (stacking)
+                {
+                    case EffectStacking.Ignore:
+                        return true;
+                    case EffectStacking.Refresh:
+                        durationEntries[existing] = DurationEntry.Periodic(
+                            modifier, durationSeconds, periodSeconds);
+                        return true;
+                }
+            }
+
+            durationEntries.Add(DurationEntry.Periodic(
+                modifier, durationSeconds, periodSeconds));
+            return true;
+        }
+
+        /// <summary>
         /// Advances regeneration and duration expiry. Called automatically;
         /// public so tests can step time deterministically.
         /// </summary>
@@ -244,6 +293,12 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 DurationEntry entry = durationEntries[i];
                 float remaining = entry.Remaining - step;
+                if (entry.IsPeriodic)
+                {
+                    TickPeriodicEntry(i, entry, remaining, step);
+                    continue;
+                }
+
                 if (remaining > 0f)
                 {
                     durationEntries[i] = new DurationEntry(entry.Modifier, remaining);
@@ -260,6 +315,30 @@ namespace Fofuxo.GameplayAbilitySystem
                     Changed?.Invoke(new AttributeValueChanged(
                         entry.Modifier.Attribute, oldValue, newValue, entry.Modifier.Source));
                 }
+            }
+        }
+
+        private void TickPeriodicEntry(
+            int index, DurationEntry entry, float remaining, float step)
+        {
+            if (remaining <= 0f)
+            {
+                durationEntries.RemoveAt(index);
+                return;
+            }
+
+            float accumulator = entry.Accumulator + step;
+            int applications = 0;
+            while (accumulator >= entry.Period && entry.Period > 0f)
+            {
+                accumulator -= entry.Period;
+                applications++;
+            }
+
+            durationEntries[index] = entry.WithRemainingAndAccumulator(remaining, accumulator);
+            for (int application = 0; application < applications; application++)
+            {
+                ApplyInstantModifier(entry.Modifier);
             }
         }
 
@@ -283,10 +362,42 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 Modifier = modifier;
                 Remaining = remaining;
+                Period = 0f;
+                Accumulator = 0f;
+            }
+
+            private DurationEntry(
+                AttributeModifier modifier,
+                float remaining,
+                float period,
+                float accumulator)
+            {
+                Modifier = modifier;
+                Remaining = remaining;
+                Period = period;
+                Accumulator = accumulator;
+            }
+
+            public static DurationEntry Periodic(
+                AttributeModifier modifier,
+                float durationSeconds,
+                float periodSeconds)
+            {
+                return new DurationEntry(modifier, durationSeconds, periodSeconds, 0f);
+            }
+
+            public DurationEntry WithRemainingAndAccumulator(
+                float remaining,
+                float accumulator)
+            {
+                return new DurationEntry(Modifier, remaining, Period, accumulator);
             }
 
             public AttributeModifier Modifier { get; }
             public float Remaining { get; }
+            public float Period { get; }
+            public float Accumulator { get; }
+            public bool IsPeriodic => Period > 0f;
         }
 
         private AttributeValue GetOrCreate(GameplayAttribute attribute)

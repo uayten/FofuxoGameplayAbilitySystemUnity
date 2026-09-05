@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Added periodic modifiers (`ApplyPeriodicModifier` with Stack/Refresh/Ignore
+  stacking) and `PeriodicAttributeEffectDefinition` for damage/heal over time:
+  every period folds into the base value like an instant change, firing the
+  set's change event per tick.
 - Added `ModifyAttributeEffectDefinition`: instant attribute damage, healing,
   and resource changes as effect data (target or owner, optional attribute
   scaling), firing the set's change event like any other attribute change.
