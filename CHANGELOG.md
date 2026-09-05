@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Added `ModifyAttributeEffectDefinition`: instant attribute damage, healing,
+  and resource changes as effect data (target or owner, optional attribute
+  scaling), firing the set's change event like any other attribute change.
 - Added ability-owned displacement: `AbilityDisplacementDirection`
   (context, owner-forward, toward/away from target), distance plus a 1-based
   frame window on `AbilityDefinition`, and kinematic `Rigidbody.MovePosition`
