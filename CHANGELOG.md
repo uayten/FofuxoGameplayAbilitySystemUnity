@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+- Added `AbilitySystem.CanActivateSequence` so AI and other callers can score
+  granted sequences without starting them.
+- Expanded the README with current capabilities, limitations, architecture,
+  authoring guidance, the proposed Attributes model, and a phased roadmap.
+- Added repository-level `AGENTS.md` instructions for consistent AI-assisted
+  development across independent sessions.
+
 ## [0.1.0] — Initial public extraction
 
 Extracted from the BossRush project as a standalone UPM package:

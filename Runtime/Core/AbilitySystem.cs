@@ -113,27 +113,54 @@ namespace Fofuxo.GameplayAbilitySystem
             return ActivateInternal(ability, context);
         }
 
+        public bool CanActivateSequence(
+            AbilitySequenceDefinition sequence,
+            AbilityContext context,
+            out string rejectionReason)
+        {
+            if (sequence == null)
+            {
+                rejectionReason = "Sequence is null.";
+                return false;
+            }
+
+            if (activeInstance != null || activeSequence != null)
+            {
+                rejectionReason = "Another ability or sequence is active.";
+                return false;
+            }
+
+            if (loadout == null || !loadout.Contains(sequence))
+            {
+                rejectionReason = "Sequence is not granted by the current loadout.";
+                return false;
+            }
+
+            if (sequence.Steps.Count == 0)
+            {
+                rejectionReason = "Sequence has no steps.";
+                return false;
+            }
+
+            if (IsOnCooldown(sequence))
+            {
+                rejectionReason = "Sequence is on cooldown.";
+                return false;
+            }
+
+            return CanActivateInternal(sequence.Steps[0], context, true, out rejectionReason);
+        }
+
         public bool TryActivateSequence(
             AbilitySequenceDefinition sequence,
             AbilityContext context)
         {
-            if (sequence == null ||
-                activeInstance != null ||
-                activeSequence != null ||
-                loadout == null ||
-                !loadout.Contains(sequence) ||
-                sequence.Steps.Count == 0 ||
-                IsOnCooldown(sequence))
+            if (!CanActivateSequence(sequence, context, out _))
             {
                 return false;
             }
 
             AbilityDefinition firstStep = sequence.Steps[0];
-            if (!CanActivateInternal(firstStep, context, true, out _))
-            {
-                return false;
-            }
-
             activeSequence = sequence;
             activeSequenceContext = context;
             activeSequenceStep = 0;
