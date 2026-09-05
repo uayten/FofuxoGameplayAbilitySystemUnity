@@ -6,6 +6,7 @@
   box/sphere/capsule, editor-only, zero cost in builds) and
   `DebugDrawEffectDefinition` so abilities can visualize query volumes at any
   timeline frame with configurable shape, color, and screen lifetime.
+  `AbilityDebugDraw.Enabled` is the master switch for clean play sessions.
 - Added `BoxDamageEffectDefinition` and `CapsuleDamageEffectDefinition`;
   melee, box, capsule, and area effects share `TargetQueries` and support
   attribute damage scaling.

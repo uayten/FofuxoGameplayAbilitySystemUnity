@@ -91,6 +91,22 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
+        public void DebugDraw_EnabledDefaultsTrueAndRestores()
+        {
+            bool previous = AbilityDebugDraw.Enabled;
+            try
+            {
+                Assert.IsTrue(AbilityDebugDraw.Enabled);
+                AbilityDebugDraw.Enabled = false;
+                Assert.IsFalse(AbilityDebugDraw.Enabled);
+            }
+            finally
+            {
+                AbilityDebugDraw.Enabled = previous;
+            }
+        }
+
+        [Test]
         public void DebugDrawEffect_NullOwnerDoesNotThrow()
         {
             DebugDrawEffectDefinition effect = NewEffect();

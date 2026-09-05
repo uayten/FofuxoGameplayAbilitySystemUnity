@@ -13,10 +13,18 @@ namespace Fofuxo.GameplayAbilitySystem
     {
         private const int SphereSegments = 24;
 
+        /// <summary>
+        /// Master switch for all debug drawing (default on). Game code can
+        /// bind it to a debug key so a play session goes fully clean, like
+        /// Unreal's debug toggles. Compiled out of player builds together
+        /// with every draw call.
+        /// </summary>
+        public static bool Enabled { get; set; } = true;
+
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void Sphere(Vector3 center, float radius, Color color, float duration = 1f)
         {
-            if (radius <= Mathf.Epsilon || duration <= 0f)
+            if (!Enabled || radius <= Mathf.Epsilon || duration <= 0f)
             {
                 return;
             }
@@ -34,7 +42,7 @@ namespace Fofuxo.GameplayAbilitySystem
             Color color,
             float duration = 1f)
         {
-            if (halfExtents.sqrMagnitude <= Mathf.Epsilon || duration <= 0f)
+            if (!Enabled || halfExtents.sqrMagnitude <= Mathf.Epsilon || duration <= 0f)
             {
                 return;
             }
@@ -61,7 +69,7 @@ namespace Fofuxo.GameplayAbilitySystem
             Color color,
             float duration = 1f)
         {
-            if (radius <= Mathf.Epsilon || duration <= 0f)
+            if (!Enabled || radius <= Mathf.Epsilon || duration <= 0f)
             {
                 return;
             }
