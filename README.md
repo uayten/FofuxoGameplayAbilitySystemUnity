@@ -525,6 +525,14 @@ Do these now, in this order:
   input-display overlay to correlate presses with activation rejections;
   a manual-sequence inspector showing step, pending advance, and window
   deadline for combo tuning.
+- Collision query doctrine for MOBA-scale combat: keep damage as single-frame
+  snapshots at trigger frames (the current model) and never per-frame
+  following sweeps — the legacy sweep-hitbox is the pattern to delete, not
+  to port. Debug-draw lifetimes are visual only and never extend the query.
+  Lingering zones (DOT fields, traps) want a pooled volume with a tick
+  cadence and enter/exit semantics instead of per-frame overlap; that is
+  Phase 5 duration/periodic work — build it on a demonstrated skill need and
+  profile first (the package exposes profiler hooks via the host MCP).
 - Move per-actor combat numbers (Health, Poise, Stamina) toward the planned
   attribute sets instead of growing bespoke health components.
 - Pool cue VFX presenters instead of instantiating per trigger once combat
