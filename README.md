@@ -48,7 +48,13 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Lifecycle events and cancellation reasons | Runtime debugger and active-effect inspector |
 | Frame-based gameplay cues | Cue replication |
 | Attributes: identifiers, sets, instant modifiers | Duration/infinite effects and stacking |
-| Manual sequence advancement (one input per step) | Input buffering and continuation windows |
+| Manual sequence advancement (one input per step) | Combo continuation windows |
+| Box/capsule damage effects, shared target queries | Projectile and collider-window effects |
+| Attribute costs, charges, input buffering | Dynamic cooldowns and cost discounts |
+| Duration modifiers with stacking, regeneration | Infinite effects and effect specs |
+| Whiff events, animation-event cue bridge | Full ability-task graph |
+| Replication sink hooks, Invulnerable tag | Cue replication |
+| AbilitySystemDebugger readout | Runtime debugger window |
 
 Current limitations are intentional and documented so consumers and
 contributors do not mistake planned APIs for implemented behavior:
@@ -243,7 +249,19 @@ public sealed class ExampleEffectDefinition : AbilityEffectDefinition
 }
 ```
 
-`MeleeDamageEffectDefinition` is the first built-in effect. It performs a
+`AreaDamageEffectDefinition` covers ground slams and bursts: a sphere
+centered on the ability aim point or on an owner-local offset, with optional
+linear damage falloff and radial knockback. Every damageable receiver in
+radius is hit (no requested-target filter).
+
+`MeleeDamageEffectDefinition` (directed sphere), `BoxDamageEffectDefinition`
+(wide swings), and `CapsuleDamageEffectDefinition` (lunges) share the
+`TargetQueries` helpers: non-allocating queries, receiver resolution from
+colliders or parents, owner exclusion, and hierarchy-aware requested-target
+matching. All damage effects accept optional attribute scaling (for example,
+Strength adds damage per point).
+
+`MeleeDamageEffectDefinition` is the single-target melee effect. It performs a
 non-allocating sphere query, resolves `IAbilityDamageReceiver` from each matching
 collider, prevents duplicate hits for the same trigger, and sends an
 `AbilityHitInfo` containing:
@@ -279,6 +297,20 @@ public sealed class MyHealth : MonoBehaviour, IAbilityDamageReceiver
     }
 }
 ```
+
+## Costs, charges, buffering, and whiffs
+
+Abilities declare `AbilityCost` entries (attribute + amount), checked before
+activation and deducted on success — Stamina for a sprint attack, for example.
+`MaxCharges` limits consecutive uses; charges refill one per
+`ChargeRestoreTime`, or all at once when the cooldown elapses when the restore
+time is zero. Validation requires limited charges to have a restore path.
+
+`AbilityInputRouter` buffers rejected inputs for `bufferWindow` seconds and
+retries them, so combo inputs pressed during recovery still land. When an
+ability with effect triggers completes without registering a hit, the system
+fires `AbilityWhiffed` alongside `AbilityCompleted` — roll and buff abilities
+without effects never whiff.
 
 ## Gameplay cues
 
@@ -376,8 +408,10 @@ data, per-actor state, and effect execution.
 Shipped as a first slice: `GameplayAttribute` identifiers, `AttributeSet`
 components with authored initial values, instant `AttributeModifier`
 application (`Add`/`Multiply`/`Override` with deterministic aggregation and
-limits), and typed `AttributeValueChanged` events. Duration/infinite effects,
-stacking, and specs remain planned below.
+limits), and typed `AttributeValueChanged` events. Duration modifiers with
+`Stack`/`Refresh`/`Ignore` policies and per-second regeneration also shipped
+(`ApplyDurationModifier`, `Tick`). Infinite effects, specs, and GameplayEffect
+execution remain planned below.
 
 ### Proposed types
 
@@ -443,6 +477,18 @@ GameplayEffectSpec
 Cooldowns and costs can later become specialized gameplay effects, but they will
 remain explicit fields until the generic effect lifecycle is proven.
 
+## Debugging and replication hooks
+
+`AbilitySystemDebugger` is a drop-in readout component: it logs ability and
+cue transitions and exposes a one-line `Summary` (active ability, frame,
+tags) for Inspector monitoring while tuning. `ActiveFrame`, `ActiveTags`,
+and `AbilityInstance.RegisteredHitCount` support custom tooling.
+
+Multiplayer stays out of scope, but the seams exist: assign an
+`IAbilityReplicationSink` to forward activations, cues, and endings to the
+netcode layer. Animation clips can also emit cues without code through
+`AbilityAnimationEventBridge.EmitGameplayCue`.
+
 ## Roadmap
 
 ### Suggested next steps (from BossRush use)
@@ -466,11 +512,14 @@ Do these now, in this order:
 
 Deliberately later:
 
-- Ability tasks for waits, animation events, and async movement (Phase 6),
-  which subsume hand-rolled buffering and facing-wait code in callers.
-- Input buffering and continuation windows (Phase 2). Explicit per-step
-  advancement already exists (`SequenceAdvancement.Manual`); the player combo
-  migration is next.
+- Ability tasks for waits and async movement (Phase 6), which subsume
+  hand-rolled facing-wait code in callers. Animation events already bridge
+  into cues.
+- Player combo migration, now unblocked: manual Grant sequences + input
+  buffering exist. Then migrate block/parry to abilities, and only then
+  delete the legacy `PlayerAttack`/`DamageInfo`/`AttackHitbox` path.
+- Projectile and collider-window effects, infinite effect specs, dynamic
+  cooldowns, and the runtime debugger window.
 - Duration/infinite effects with stacking (Phase 5) for burns, guards, and
   buffs; costs and cooldowns can migrate onto them afterward.
 - A runtime debugger showing the active ability, frame, tags, cooldowns, and

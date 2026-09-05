@@ -29,6 +29,13 @@ namespace Fofuxo.GameplayAbilitySystem
         [Header("Activation")]
         [SerializeField, Min(0f)] private float cooldown;
         [SerializeField] private AbilityCooldownStartPolicy cooldownStartPolicy;
+
+        [Header("Costs and Charges")]
+        [SerializeField] private AbilityCost[] costs = { };
+        [Tooltip("Charges available before the restore timer refills them. Zero means unlimited.")]
+        [SerializeField, Min(0)] private int maxCharges;
+        [Tooltip("Seconds to restore one charge. Zero restores all charges at once after the cooldown elapses.")]
+        [SerializeField, Min(0f)] private float chargeRestoreTime;
         [SerializeField] private AbilityCancelMask allowedCancellation = AbilityCancelMask.All;
         [SerializeField] private bool lockMovementDuringAbility = true;
 
@@ -63,6 +70,10 @@ namespace Fofuxo.GameplayAbilitySystem
         public float Duration => RecoveryEndFrame / FrameRate;
         public float Cooldown => Mathf.Max(0f, cooldown);
         public AbilityCooldownStartPolicy CooldownStartPolicy => cooldownStartPolicy;
+        public IReadOnlyList<AbilityCost> Costs => costs;
+        public int MaxCharges => Mathf.Max(0, maxCharges);
+        public float ChargeRestoreTime => Mathf.Max(0f, chargeRestoreTime);
+        public bool HasLimitedCharges => MaxCharges > 0;
         public bool LockMovementDuringAbility => lockMovementDuringAbility;
         public IReadOnlyList<GameplayTag> RequiredTags => requiredTags;
         public IReadOnlyList<GameplayTag> BlockedTags => blockedTags;
@@ -106,6 +117,28 @@ namespace Fofuxo.GameplayAbilitySystem
             if (ActiveEndFrame > RecoveryEndFrame)
             {
                 error = "Recovery End Frame must be greater than or equal to Active End Frame.";
+                return false;
+            }
+
+            for (int i = 0; i < costs.Length; i++)
+            {
+                AbilityCost cost = costs[i];
+                if (cost.Attribute.IsEmpty)
+                {
+                    error = $"Cost {i + 1} has no attribute assigned.";
+                    return false;
+                }
+
+                if (cost.Amount <= 0f)
+                {
+                    error = $"Cost {i + 1} must be greater than zero.";
+                    return false;
+                }
+            }
+
+            if (HasLimitedCharges && ChargeRestoreTime <= 0f && Cooldown <= 0f)
+            {
+                error = "Limited charges require a charge restore time or a cooldown.";
                 return false;
             }
 
@@ -155,6 +188,8 @@ namespace Fofuxo.GameplayAbilitySystem
             recoveryEndFrame = Mathf.Max(activeEndFrame, recoveryEndFrame);
             fallbackFrameRate = Mathf.Max(1f, fallbackFrameRate);
             cooldown = Mathf.Max(0f, cooldown);
+            maxCharges = Mathf.Max(0, maxCharges);
+            chargeRestoreTime = Mathf.Max(0f, chargeRestoreTime);
             baseAiWeight = Mathf.Max(0f, baseAiWeight);
         }
     }

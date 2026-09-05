@@ -2,7 +2,8 @@
     "name": "Uayten.FofuxoGameplayAbilitySystem.Tests",
     "rootNamespace": "Fofuxo.GameplayAbilitySystem.Tests",
     "references": [
-        "Uayten.FofuxoGameplayAbilitySystem"
+        "Uayten.FofuxoGameplayAbilitySystem",
+        "Uayten.FofuxoGameplayAbilitySystem.Input"
     ],
     "includePlatforms": [
         "Editor"

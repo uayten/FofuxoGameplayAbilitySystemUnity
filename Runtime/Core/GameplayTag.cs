@@ -57,5 +57,6 @@ namespace Fofuxo.GameplayAbilitySystem
         public static readonly GameplayTag KnockedDown = new("State.KnockedDown");
         public static readonly GameplayTag Dead = new("State.Dead");
         public static readonly GameplayTag ActionLocked = new("State.ActionLocked");
+        public static readonly GameplayTag Invulnerable = new("State.Invulnerable");
     }
 }

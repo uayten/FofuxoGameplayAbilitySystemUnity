@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Added `BoxDamageEffectDefinition` and `CapsuleDamageEffectDefinition`;
+  melee, box, capsule, and area effects share `TargetQueries` and support
+  attribute damage scaling.
+- Added ability costs (`AbilityCost`), limited charges with restore timers,
+  router input buffering, and `AbilityWhiffed` events.
+- Added duration modifiers with stacking policies, regeneration, and a
+  deterministic `AttributeSet.Tick`.
+- Added `AbilityAnimationEventBridge`, `AbilitySystemDebugger`,
+  `IAbilityReplicationSink` hooks, `ActiveFrame`/`ActiveTags` accessors,
+  and the `State.Invulnerable` tag.
+- Added `AreaDamageEffectDefinition`: aim-point or self-centered sphere damage
+  with linear falloff, radial knockback, and multi-target limits.
 - Added the Attributes subsystem (`GameplayAttribute`, `AttributeModifier`,
   `AttributeValue`, `AttributeSet`) with deterministic Add/Multiply/Override
   aggregation, limits, and typed change events.

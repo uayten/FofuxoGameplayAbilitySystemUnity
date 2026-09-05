@@ -2,24 +2,29 @@ using UnityEngine;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
+    /// <summary>
+    /// Directed box damage for wide swings and cleaves. The box is centered on
+    /// an owner-local offset and oriented with the owner. Only receivers
+    /// matching the requested target are hit.
+    /// </summary>
     [CreateAssetMenu(
-        fileName = "MeleeDamageEffect",
-        menuName = "Fofuxo/Abilities/Effects/Melee Damage")]
-    public sealed class MeleeDamageEffectDefinition : AbilityEffectDefinition
+        fileName = "BoxDamageEffect",
+        menuName = "Fofuxo/Abilities/Effects/Box Damage")]
+    public sealed class BoxDamageEffectDefinition : AbilityEffectDefinition
     {
         private const int HitCapacity = 32;
         private static readonly Collider[] HitBuffer = new Collider[HitCapacity];
 
         [SerializeField] private LayerMask targetLayers;
-        [SerializeField] private Vector3 localCenter = new(0f, 1f, 1.05f);
-        [SerializeField, Min(0.05f)] private float radius = 1.05f;
+        [SerializeField] private Vector3 localCenter = new(0f, 1f, 1f);
+        [SerializeField] private Vector3 halfExtents = new(1.5f, 1f, 1.5f);
         [SerializeField, Min(1)] private int damage = 1;
         [SerializeField, Min(0f)] private float horizontalKnockback;
         [SerializeField] private float verticalKnockback;
         [SerializeField, Min(0f)] private float knockbackDuration;
         [SerializeField] private AbilityImpact impact = AbilityImpact.Light;
         [SerializeField] private bool canBeParried = true;
-        [SerializeField, Min(1)] private int maximumTargets = 1;
+        [SerializeField, Min(1)] private int maximumTargets = 3;
         [Header("Attribute Scaling")]
         [SerializeField] private GameplayAttribute scaleAttribute;
         [SerializeField, Min(0f)] private float scaleFactor;
@@ -33,11 +38,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
             Transform ownerTransform = context.Owner.transform;
             Vector3 center = ownerTransform.TransformPoint(localCenter);
-            int hitCount = TargetQueries.OverlapReceivers(
+            Quaternion orientation = ownerTransform.rotation;
+            int layerMask = targetLayers.value == 0 ? Physics.AllLayers : targetLayers.value;
+            int hitCount = Physics.OverlapBoxNonAlloc(
                 center,
-                radius,
-                targetLayers.value,
-                HitBuffer);
+                halfExtents,
+                HitBuffer,
+                orientation,
+                layerMask,
+                QueryTriggerInteraction.Collide);
             int scaledDamage =
                 damage + TargetQueries.ResolveBonusDamage(
                     context.Owner, scaleAttribute, scaleFactor);
@@ -58,8 +67,8 @@ namespace Fofuxo.GameplayAbilitySystem
                 }
 
                 Collider targetCollider = HitBuffer[i];
-                Vector3 direction = receiverComponent.transform.position - ownerTransform.position;
-                Vector3 planarDirection = Vector3.ProjectOnPlane(direction, Vector3.up);
+                Vector3 planarDirection = Vector3.ProjectOnPlane(
+                    ownerTransform.forward, Vector3.up);
                 if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
                 {
                     planarDirection = ownerTransform.forward;
@@ -73,7 +82,7 @@ namespace Fofuxo.GameplayAbilitySystem
                     scaledDamage,
                     context.Owner,
                     targetCollider.ClosestPoint(center),
-                    direction,
+                    ownerTransform.forward,
                     knockback,
                     knockbackDuration,
                     impact,
@@ -88,11 +97,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void OnValidate()
         {
-            radius = Mathf.Max(0.05f, radius);
+            halfExtents = new Vector3(
+                Mathf.Max(0.05f, halfExtents.x),
+                Mathf.Max(0.05f, halfExtents.y),
+                Mathf.Max(0.05f, halfExtents.z));
             damage = Mathf.Max(1, damage);
+            maximumTargets = Mathf.Clamp(maximumTargets, 1, HitCapacity);
             horizontalKnockback = Mathf.Max(0f, horizontalKnockback);
             knockbackDuration = Mathf.Max(0f, knockbackDuration);
-            maximumTargets = Mathf.Clamp(maximumTargets, 1, HitCapacity);
+            scaleFactor = Mathf.Max(0f, scaleFactor);
         }
     }
 }

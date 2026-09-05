@@ -15,6 +15,8 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly Dictionary<GameplayTag, int> grantedTagCounts = new();
         private readonly HashSet<GameplayTag> looseTags = new();
         private readonly List<GameplayTag> firedCues = new();
+        private readonly Dictionary<AbilityDefinition, float> charges = new();
+        private readonly Dictionary<AbilityDefinition, float> chargeRestoreTimers = new();
 
         private AbilityInstance activeInstance;
         private AbilitySequenceDefinition activeSequence;
@@ -25,6 +27,24 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public AbilityDefinition ActiveAbility => activeInstance?.Definition;
         public AbilitySequenceDefinition ActiveSequence => activeSequence;
+        public int ActiveFrame => activeInstance?.CurrentFrame ?? 0;
+
+        public IReadOnlyCollection<GameplayTag> ActiveTags
+        {
+            get
+            {
+                var tags = new List<GameplayTag>(looseTags);
+                foreach (KeyValuePair<GameplayTag, int> entry in grantedTagCounts)
+                {
+                    if (entry.Value > 0 && !tags.Contains(entry.Key))
+                    {
+                        tags.Add(entry.Key);
+                    }
+                }
+
+                return tags;
+            }
+        }
         public AbilityPhase? ActivePhase => activeInstance?.CurrentPhase;
         public bool IsActive => activeInstance != null;
         public AbilityLoadout Loadout => loadout;
@@ -41,6 +61,13 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public event Action<AbilitySequenceDefinition, int> SequenceAwaitingAdvance;
         /// <summary>
+        /// Fires when an ability with effect triggers completes without
+        /// registering any hit.
+        /// </summary>
+        public event Action<AbilityDefinition, AbilityContext> AbilityWhiffed;
+
+        public IAbilityReplicationSink ReplicationSink { get; set; }
+        /// <summary>
         /// Fires for cosmetic cues only. Game code presents them as VFX, SFX,
         /// or UI and must never change gameplay state in response.
         /// </summary>
@@ -56,6 +83,8 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void Update()
         {
+            TickChargeRestore(Time.deltaTime);
+
             if (activeInstance == null)
             {
                 if (awaitingManualAdvance &&
@@ -101,6 +130,7 @@ namespace Fofuxo.GameplayAbilitySystem
                     activeInstance.Definition,
                     firedCues[i],
                     activeInstance.Context);
+                ReplicationSink?.OnGameplayCue(firedCues[i], activeInstance.Context);
             }
 
             if (previousPhase != activeInstance.CurrentPhase)
@@ -338,6 +368,7 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             GameplayCueTriggered?.Invoke(activeInstance?.Definition, cue, context);
+            ReplicationSink?.OnGameplayCue(cue, context);
         }
 
         private bool CanActivateInternal(
@@ -379,6 +410,23 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 rejectionReason = "Ability is on cooldown.";
                 return false;
+            }
+
+            if (ability.HasLimitedCharges && GetCharges(ability) < 1f)
+            {
+                rejectionReason = "Ability has no charges left.";
+                return false;
+            }
+
+            AttributeSet attributeSet =
+                context.Owner != null ? context.Owner.GetComponent<AttributeSet>() : null;
+            foreach (AbilityCost cost in ability.Costs)
+            {
+                if (attributeSet == null || attributeSet.GetCurrent(cost.Attribute) < cost.Amount)
+                {
+                    rejectionReason = $"Insufficient attribute for cost: {cost.Attribute}.";
+                    return false;
+                }
             }
 
             foreach (GameplayTag requiredTag in ability.RequiredTags)
@@ -438,6 +486,8 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             activeInstance = new AbilityInstance(ability, context);
             AddGrantedTags(ability);
+            PayCosts(ability, context);
+            ConsumeCharge(ability);
 
             if (ability.CooldownStartPolicy == AbilityCooldownStartPolicy.OnActivation)
             {
@@ -447,12 +497,16 @@ namespace Fofuxo.GameplayAbilitySystem
             PlayAbilityAnimation(ability);
             AbilityStarted?.Invoke(ability);
             AbilityPhaseChanged?.Invoke(ability, activeInstance.CurrentPhase);
+            ReplicationSink?.OnAbilityActivated(ability, context);
             return true;
         }
 
         private void CompleteActiveAbility()
         {
             AbilityDefinition completedAbility = activeInstance.Definition;
+            AbilityContext completedContext = activeInstance.Context;
+            bool hitAnything = activeInstance.RegisteredHitCount > 0;
+            bool tracksHits = completedAbility.EffectTriggers.Count > 0;
             RemoveGrantedTags(completedAbility);
             activeInstance = null;
 
@@ -462,6 +516,11 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             AbilityCompleted?.Invoke(completedAbility);
+            ReplicationSink?.OnAbilityEnded(completedAbility, completedContext, true);
+            if (tracksHits && !hitAnything)
+            {
+                AbilityWhiffed?.Invoke(completedAbility, completedContext);
+            }
 
             if (activeSequence == null)
             {
@@ -506,9 +565,11 @@ namespace Fofuxo.GameplayAbilitySystem
         private void CancelActiveAbilityInternal(AbilityCancelReason reason)
         {
             AbilityDefinition cancelledAbility = activeInstance.Definition;
+            AbilityContext cancelledContext = activeInstance.Context;
             RemoveGrantedTags(cancelledAbility);
             activeInstance = null;
             AbilityCancelled?.Invoke(cancelledAbility, reason);
+            ReplicationSink?.OnAbilityEnded(cancelledAbility, cancelledContext, false);
 
             if (activeSequence != null)
             {
@@ -537,6 +598,100 @@ namespace Fofuxo.GameplayAbilitySystem
             if (ability.Cooldown > 0f)
             {
                 cooldownEndTimes[ability] = Time.time + ability.Cooldown;
+            }
+        }
+
+        private float GetCharges(AbilityDefinition ability)
+        {
+            if (!ability.HasLimitedCharges)
+            {
+                return float.PositiveInfinity;
+            }
+
+            if (!charges.TryGetValue(ability, out float remaining))
+            {
+                remaining = ability.MaxCharges;
+                charges[ability] = remaining;
+            }
+
+            return remaining;
+        }
+
+        private void ConsumeCharge(AbilityDefinition ability)
+        {
+            if (!ability.HasLimitedCharges)
+            {
+                return;
+            }
+
+            charges[ability] = Mathf.Max(0f, GetCharges(ability) - 1f);
+            chargeRestoreTimers[ability] = 0f;
+        }
+
+        private void TickChargeRestore(float deltaTime)
+        {
+            if (charges.Count == 0)
+            {
+                return;
+            }
+
+            var drained = new List<AbilityDefinition>();
+            foreach (KeyValuePair<AbilityDefinition, float> entry in charges)
+            {
+                AbilityDefinition ability = entry.Key;
+                if (ability == null || entry.Value >= ability.MaxCharges)
+                {
+                    continue;
+                }
+
+                if (ability.ChargeRestoreTime > 0f)
+                {
+                    chargeRestoreTimers.TryGetValue(ability, out float elapsed);
+                    elapsed += Mathf.Max(0f, deltaTime);
+                    if (elapsed < ability.ChargeRestoreTime)
+                    {
+                        chargeRestoreTimers[ability] = elapsed;
+                        continue;
+                    }
+
+                    chargeRestoreTimers[ability] = 0f;
+                    charges[ability] = Mathf.Min(ability.MaxCharges, entry.Value + 1f);
+                }
+                else if (!IsOnCooldown(ability))
+                {
+                    charges[ability] = ability.MaxCharges;
+                }
+
+                if (charges[ability] >= ability.MaxCharges)
+                {
+                    drained.Add(ability);
+                }
+            }
+
+            foreach (AbilityDefinition ability in drained)
+            {
+                charges.Remove(ability);
+                chargeRestoreTimers.Remove(ability);
+            }
+        }
+
+        private void PayCosts(AbilityDefinition ability, AbilityContext context)
+        {
+            if (ability.Costs.Count == 0 || context.Owner == null)
+            {
+                return;
+            }
+
+            AttributeSet attributeSet = context.Owner.GetComponent<AttributeSet>();
+            if (attributeSet == null)
+            {
+                return;
+            }
+
+            foreach (AbilityCost cost in ability.Costs)
+            {
+                attributeSet.ApplyInstantModifier(new AttributeModifier(
+                    cost.Attribute, AttributeOperation.Add, -cost.Amount, context.Owner));
             }
         }
 

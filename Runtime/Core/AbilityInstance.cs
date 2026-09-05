@@ -24,6 +24,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public float ElapsedTime { get; private set; }
         public int CurrentFrame { get; private set; }
         public AbilityPhase CurrentPhase { get; private set; }
+        public int RegisteredHitCount => registeredHits.Count;
 
         internal bool Tick(
             AbilitySystem abilitySystem,

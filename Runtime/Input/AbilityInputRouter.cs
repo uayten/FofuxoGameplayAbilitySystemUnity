@@ -38,10 +38,17 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private Transform explicitTarget;
         [SerializeField, FormerlySerializedAs("findEnemyTargetWhenMissing")]
         private bool findFallbackTargetWhenMissing = true;
+        [Tooltip("Seconds a rejected input is retried. Zero disables buffering.")]
+        [SerializeField, Min(0f)] private float bufferWindow;
 
         private AbilitySystem abilitySystem;
         private readonly List<InputAction> subscribedActions = new();
         private readonly Dictionary<InputAction, AbilityNamedInputBinding> namedLookup = new();
+        private AbilityDefinition bufferedAbility;
+        private AbilitySequenceDefinition bufferedSequence;
+        private AbilityContext bufferedContext;
+        private float bufferExpiry;
+        private bool hasBufferedInput;
 
         /// <summary>
         /// Per-instance hook used when no explicit target is set. Assign it
@@ -121,6 +128,37 @@ namespace Fofuxo.GameplayAbilitySystem
 
             subscribedActions.Clear();
             namedLookup.Clear();
+            ClearBufferedInput();
+        }
+
+        private void Update()
+        {
+            if (!hasBufferedInput || abilitySystem == null)
+            {
+                return;
+            }
+
+            if (Time.time > bufferExpiry)
+            {
+                ClearBufferedInput();
+                return;
+            }
+
+            if (bufferedSequence != null)
+            {
+                if (abilitySystem.TryActivateSequence(bufferedSequence, bufferedContext))
+                {
+                    ClearBufferedInput();
+                }
+
+                return;
+            }
+
+            if (bufferedAbility != null &&
+                abilitySystem.TryActivate(bufferedAbility, bufferedContext))
+            {
+                ClearBufferedInput();
+            }
         }
 
         private void OnAbilityInputPerformed(InputAction.CallbackContext inputContext)
@@ -152,16 +190,30 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             GameObject target = ResolveTarget();
             AbilityContext context = AbilityContext.FromTarget(gameObject, target);
-            if (sequence != null)
+            bool activated = sequence != null
+                ? abilitySystem.TryActivateSequence(sequence, context)
+                : ability != null && abilitySystem.TryActivate(ability, context);
+            if (!activated && bufferWindow > 0f && (sequence != null || ability != null))
             {
-                abilitySystem.TryActivateSequence(sequence, context);
-                return;
+                bufferedAbility = ability;
+                bufferedSequence = sequence;
+                bufferedContext = context;
+                bufferExpiry = Time.time + bufferWindow;
+                hasBufferedInput = true;
             }
+            else if (activated)
+            {
+                ClearBufferedInput();
+            }
+        }
 
-            if (ability != null)
-            {
-                abilitySystem.TryActivate(ability, context);
-            }
+        private void ClearBufferedInput()
+        {
+            bufferedAbility = null;
+            bufferedSequence = null;
+            bufferedContext = default;
+            bufferExpiry = 0f;
+            hasBufferedInput = false;
         }
 
         private GameObject ResolveTarget()
