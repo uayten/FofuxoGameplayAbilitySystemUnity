@@ -27,7 +27,7 @@ sealed class AbilityAnimationPreview
     private const float CameraMargin = 1.6f;
 
     private static readonly GUIStyle previewBackground = BuildBackground();
-    private static readonly GUIStyle overlayLabel = BuildOverlayLabel();
+    private static GUIStyle overlayLabel;
     private static Func<AnimationClip, GameObject> previewModelGetter;
     private static bool previewModelLookupDone;
 
@@ -251,6 +251,10 @@ sealed class AbilityAnimationPreview
 
     private void DrawOverlay(Rect rect, AnimationClip clip, float length, int damageFrame)
     {
+        // Built here, not in the static constructor: EditorStyles is not
+        // usable yet when the type initializer runs from GetPreviewTitle.
+        overlayLabel ??= BuildOverlayLabel();
+
         float frameRate = Mathf.Max(clip.frameRate, 1f);
         int totalFrames = Mathf.Max(1, Mathf.FloorToInt(length * frameRate));
         int frame = Mathf.Clamp(Mathf.FloorToInt(previewTime * frameRate), 0, totalFrames);
@@ -321,9 +325,12 @@ sealed class AbilityAnimationPreview
 
     private static GUIStyle BuildOverlayLabel()
     {
-        return new GUIStyle(EditorStyles.miniLabel)
+        // Plain style on purpose: no EditorStyles dependency, so this is
+        // safe whenever the first viewport draw happens.
+        return new GUIStyle
         {
             alignment = TextAnchor.MiddleCenter,
             normal = { textColor = Color.white },
         };
     }
+}
