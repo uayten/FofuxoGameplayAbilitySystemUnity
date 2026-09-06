@@ -58,7 +58,7 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AbilityEffectTrigger[] effectTriggers = { };
         [Tooltip("Reactive rewards applied to the owner on a successful parry while this ability is active (e.g. the block heal). The numbers live here, not in components.")]
         [SerializeField] private AbilityEffectDefinition[] onParryEffects = { };
-        [Tooltip("Nested ability executed on activation, before displacement and animation (e.g. target assist inside attacks). Runs without cooldown, costs, tags, or animation as part of this activation.")]
+        [Tooltip("Nested ability resolved on activation before the parent animation (e.g. target assist inside attacks). Runs without its own cooldown, costs, tags, or animation; it may schedule startup approach movement on the parent.")]
         [SerializeField] private TargetAssistDefinition nestedAssist;
 
         [Header("Gameplay Cues")]
@@ -212,6 +212,12 @@ namespace Fofuxo.GameplayAbilitySystem
             if (nestedAssist != null && !nestedAssist.TryValidate(out error))
             {
                 error = "Nested assist is invalid: " + error;
+                return false;
+            }
+
+            if (nestedAssist != null && nestedAssist.ApproachTarget && HasDisplacement)
+            {
+                error = "An ability cannot combine target-assist approach with its own displacement.";
                 return false;
             }
 

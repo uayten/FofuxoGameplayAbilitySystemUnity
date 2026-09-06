@@ -70,6 +70,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 Vector3 expected = (target.transform.position - owner.transform.position).normalized;
                 expected.y = 0f;
                 Assert.Less(Vector3.Angle(owner.transform.forward, expected), 3f);
+                Assert.AreEqual(target, system.ActiveContext?.Target);
             }
             finally
             {
@@ -105,6 +106,8 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 Assert.IsTrue(system.TryActivate(
                     attack, AbilityContext.FromTarget(owner, null)));
                 Assert.AreEqual(before, owner.transform.forward);
+                Assert.IsNull(system.ActiveContext?.Target);
+                Assert.IsFalse(system.HasActiveDisplacement);
             }
             finally
             {
@@ -112,6 +115,140 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 Object.DestroyImmediate(attack);
                 Object.DestroyImmediate(assist);
                 Object.DestroyImmediate(loadout);
+            }
+        }
+
+        [Test]
+        public void ZeroSearchDistanceUsesTwiceProximityRadius()
+        {
+            TargetAssistDefinition assist =
+                ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            try
+            {
+                SetField(assist, "searchDistance", 0f);
+                SetField(assist, "proximityRadius", 4f);
+
+                Assert.AreEqual(8f, assist.ResolveSearchDistance(3f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(assist);
+            }
+        }
+
+        [Test]
+        public void ProximityRadiusSelectsTargetOutsideTheForwardCone()
+        {
+            GameObject owner = new("AssistOwner");
+            GameObject target = new("AssistTarget");
+            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
+            try
+            {
+                target.transform.position = Vector3.back * 3f;
+                target.AddComponent<BoxCollider>();
+                target.AddComponent<StubReceiver>();
+
+                SetField(attack, "abilityId", "test.assist.attack");
+                SetField(attack, "requiresTarget", false);
+                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
+                SetField(assist, "targetLayers", MakeMask(1 << target.layer));
+                SetField(assist, "searchDistance", 0f);
+                SetField(assist, "proximityRadius", 4f);
+                SetField(assist, "coneHalfAngle", 35f);
+                attack.SetNestedAssistForTests(assist);
+                SetField(loadout, "abilities", new[] { attack });
+
+                AbilitySystem system = owner.AddComponent<AbilitySystem>();
+                SetField(system, "loadout", loadout);
+                Physics.SyncTransforms();
+
+                Assert.IsTrue(system.TryActivate(
+                    attack, AbilityContext.FromDirection(owner, null, Vector3.forward)));
+                Assert.AreEqual(target, system.ActiveContext?.Target);
+                Assert.Less(Vector3.Angle(owner.transform.forward, Vector3.back), 3f);
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(attack);
+                Object.DestroyImmediate(assist);
+                Object.DestroyImmediate(loadout);
+            }
+        }
+
+        [Test]
+        public void SelectedDistantTargetStartsApproachDuringParentStartup()
+        {
+            GameObject owner = new("AssistOwner");
+            GameObject target = new("AssistTarget");
+            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
+            try
+            {
+                owner.AddComponent<Rigidbody>();
+                target.transform.position = Vector3.forward * 7f;
+                target.AddComponent<BoxCollider>();
+                target.AddComponent<StubReceiver>();
+
+                SetField(attack, "abilityId", "test.assist.attack");
+                SetField(attack, "requiresTarget", false);
+                SetField(attack, "startupEndFrame", 20);
+                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
+                SetField(assist, "targetLayers", MakeMask(1 << target.layer));
+                SetField(assist, "searchDistance", 0f);
+                SetField(assist, "proximityRadius", 4f);
+                SetField(assist, "approachTarget", true);
+                SetField(assist, "stoppingDistance", 0f);
+                attack.SetNestedAssistForTests(assist);
+                SetField(loadout, "abilities", new[] { attack });
+
+                AbilitySystem system = owner.AddComponent<AbilitySystem>();
+                SetField(system, "loadout", loadout);
+                Physics.SyncTransforms();
+
+                Assert.IsTrue(system.TryActivate(
+                    attack, AbilityContext.FromDirection(owner, null, Vector3.forward)));
+                Assert.AreEqual(target, system.ActiveContext?.Target);
+                Assert.IsTrue(system.HasActiveDisplacement);
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(attack);
+                Object.DestroyImmediate(assist);
+                Object.DestroyImmediate(loadout);
+            }
+        }
+
+        [Test]
+        public void ApproachAndParentDisplacementCannotShareOneAbility()
+        {
+            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            try
+            {
+                SetField(attack, "abilityId", "test.assist.attack");
+                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
+                SetField(assist, "approachTarget", true);
+                attack.SetNestedAssistForTests(assist);
+                attack.ConfigureDisplacementForTests(
+                    AbilityDisplacementDirection.Context,
+                    1f,
+                    1,
+                    2);
+
+                Assert.IsFalse(attack.TryValidate(out string error));
+                StringAssert.Contains("displacement", error);
+            }
+            finally
+            {
+                Object.DestroyImmediate(attack);
+                Object.DestroyImmediate(assist);
             }
         }
 

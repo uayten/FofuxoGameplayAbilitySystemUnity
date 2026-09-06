@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Target Assist now resolves before its parent ability, defaults its cone reach
+  to twice the proximity radius, propagates the selected target and direction
+  into the parent context, and can approach during the parent's startup until
+  its maximum range is reached. Added focused circle/cone, context, movement,
+  and displacement-conflict tests.
+- Moved the detailed GAS-inspired development plan to
+  `Documentation~/ROADMAP.md`; the README now keeps a short linked summary and
+  documents the intended split between damage effects and knockback reactions.
 - Router no longer resolves a fallback target for targetless single
   abilities: `RequiresTarget` false means no target, so self novas never hit
   a meaningless range gate. Sequences keep the fallback for their steps.

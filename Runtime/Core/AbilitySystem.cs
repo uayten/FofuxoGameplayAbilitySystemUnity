@@ -7,6 +7,9 @@ namespace Fofuxo.GameplayAbilitySystem
     [DisallowMultipleComponent]
     public sealed class AbilitySystem : MonoBehaviour
     {
+        private const int AssistTargetCapacity = 32;
+        private static readonly Collider[] AssistTargetBuffer = new Collider[AssistTargetCapacity];
+
         [SerializeField] private AbilityLoadout loadout;
         [SerializeField] private Animator animator;
 
@@ -46,6 +49,8 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
         public AbilityPhase? ActivePhase => activeInstance?.CurrentPhase;
+        public AbilityContext? ActiveContext => activeInstance?.Context;
+        public bool HasActiveDisplacement => activeInstance?.HasActiveDisplacement ?? false;
         public bool IsActive => activeInstance != null;
         public AbilityLoadout Loadout => loadout;
 
@@ -392,32 +397,35 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
-        /// Executes the nested ability of an activation: currently target
-        /// assist (query enemies around the context direction, snap the owner
-        /// toward the best one). Instant and tagless; the parent keeps owning
-        /// the timeline, cooldown, and animation.
+        /// Resolves the nested prelude of an activation: currently target
+        /// assist (query enemies around the context direction, snap the owner,
+        /// propagate the target, and calculate startup approach). Selection is
+        /// instant and tagless; the parent keeps owning the timeline, movement,
+        /// cooldown, and animation.
         /// </summary>
-        private static void RunNestedAssist(AbilityDefinition ability, AbilityContext context)
+        private static AbilityContext ResolveNestedAssist(
+            AbilityDefinition ability,
+            AbilityContext context,
+            out float approachDistance)
         {
+            approachDistance = 0f;
             TargetAssistDefinition assist = ability.NestedAssist;
             GameObject owner = context.Owner;
             if (assist == null || owner == null)
             {
-                return;
+                return context;
             }
 
             int layers = assist.TargetLayerMask;
             if (layers == 0)
             {
-                return;
+                return context;
             }
 
-            float distance = assist.SearchDistance > 0f
-                ? assist.SearchDistance
-                : Mathf.Max(0f, ability.MaximumRange);
+            float distance = assist.ResolveSearchDistance(ability.MaximumRange);
             if (distance <= Mathf.Epsilon)
             {
-                return;
+                return context;
             }
 
             float cone = Mathf.Min(
@@ -429,19 +437,20 @@ namespace Fofuxo.GameplayAbilitySystem
                 facing = owner.transform.forward;
             }
 
-            Collider[] candidates = new Collider[32];
             int candidateCount = Physics.OverlapSphereNonAlloc(
                 owner.transform.position,
                 distance,
-                candidates,
+                AssistTargetBuffer,
                 layers,
                 QueryTriggerInteraction.Collide);
 
             float bestScore = float.PositiveInfinity;
             Vector3 bestDirection = Vector3.zero;
+            float bestDistance = 0f;
+            Component bestReceiver = null;
             for (int i = 0; i < candidateCount; i++)
             {
-                Collider candidate = candidates[i];
+                Collider candidate = AssistTargetBuffer[i];
                 if (candidate == null ||
                     candidate.gameObject == owner ||
                     candidate.transform.IsChildOf(owner.transform) ||
@@ -456,6 +465,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 }
 
                 if (candidate.GetComponentInParent<IAbilityDamageReceiver>() is not IAbilityDamageReceiver receiver ||
+                    receiver is not Component receiverComponent ||
                     !receiver.IsDamageable)
                 {
                     continue;
@@ -475,12 +485,28 @@ namespace Fofuxo.GameplayAbilitySystem
 
                 bestScore = score;
                 bestDirection = candidateDirection;
+                bestDistance = candidateDistance;
+                bestReceiver = receiverComponent;
             }
 
-            if (bestDirection.sqrMagnitude > Mathf.Epsilon)
+            if (bestDirection.sqrMagnitude <= Mathf.Epsilon || bestReceiver == null)
             {
-                owner.transform.rotation = Quaternion.LookRotation(bestDirection, Vector3.up);
+                return context;
             }
+
+            owner.transform.rotation = Quaternion.LookRotation(bestDirection, Vector3.up);
+            if (assist.ApproachTarget)
+            {
+                float stoppingDistance = assist.ResolveStoppingDistance(ability.MaximumRange);
+                approachDistance = Mathf.Max(0f, bestDistance - stoppingDistance);
+            }
+
+            GameObject target = bestReceiver.gameObject;
+            return new AbilityContext(
+                owner,
+                target,
+                bestDirection,
+                target.transform.position);
         }
 
         private static bool TryGetAssistDirection(
@@ -626,11 +652,18 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private bool ActivateInternal(AbilityDefinition ability, AbilityContext context)
         {
-            activeInstance = new AbilityInstance(ability, context);
-            RunNestedAssist(ability, context);
-            BeginInstanceDisplacement(activeInstance, ability, context);
+            AbilityContext resolvedContext = ResolveNestedAssist(
+                ability,
+                context,
+                out float assistApproachDistance);
+            activeInstance = new AbilityInstance(ability, resolvedContext);
+            BeginInstanceDisplacement(
+                activeInstance,
+                ability,
+                resolvedContext,
+                assistApproachDistance);
             AddGrantedTags(ability);
-            PayCosts(ability, context);
+            PayCosts(ability, resolvedContext);
             ConsumeCharge(ability);
 
             if (ability.CooldownStartPolicy == AbilityCooldownStartPolicy.OnActivation)
@@ -641,7 +674,7 @@ namespace Fofuxo.GameplayAbilitySystem
             PlayAbilityAnimation(ability);
             AbilityStarted?.Invoke(ability);
             AbilityPhaseChanged?.Invoke(ability, activeInstance.CurrentPhase);
-            ReplicationSink?.OnAbilityActivated(ability, context);
+            ReplicationSink?.OnAbilityActivated(ability, resolvedContext);
             return true;
         }
 
@@ -881,24 +914,53 @@ namespace Fofuxo.GameplayAbilitySystem
         private static void BeginInstanceDisplacement(
             AbilityInstance instance,
             AbilityDefinition ability,
-            AbilityContext context)
+            AbilityContext context,
+            float assistApproachDistance)
         {
-            if (instance == null || !ability.HasDisplacement)
+            if (instance == null)
             {
                 return;
             }
 
-            Vector3 direction = AbilityDisplacement.ResolveDirection(
-                ability.DisplacementDirection,
-                context);
+            int startFrame;
+            int endFrame;
+            float distance;
+            Vector3 direction;
+            if (assistApproachDistance > Mathf.Epsilon)
+            {
+                startFrame = 1;
+                endFrame = Mathf.Max(2, ability.StartupEndFrame);
+                distance = assistApproachDistance;
+                direction = context.Direction;
+            }
+            else if (ability.HasDisplacement)
+            {
+                startFrame = ability.DisplacementStartFrame;
+                endFrame = ability.DisplacementEndFrame;
+                distance = ability.DisplacementDistance;
+                direction = AbilityDisplacement.ResolveDirection(
+                    ability.DisplacementDirection,
+                    context);
+            }
+            else
+            {
+                return;
+            }
+
             Rigidbody body = context.Owner != null
                 ? context.Owner.GetComponent<Rigidbody>()
                 : null;
+            float duration = AbilityDisplacement.WindowDurationSeconds(
+                startFrame,
+                endFrame,
+                ability.FrameRate);
             instance.BeginDisplacement(
                 direction,
                 body,
-                ability.DisplacementDistance,
-                ability.DisplacementDurationSeconds);
+                distance,
+                duration,
+                startFrame,
+                endFrame);
         }
 
         /// <summary>
@@ -911,14 +973,8 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             if (instance == null ||
                 !instance.HasActiveDisplacement ||
-                instance.DisplacementBody == null)
-            {
-                return;
-            }
-
-            int currentFrame = instance.CurrentFrame;
-            if (currentFrame < instance.Definition.DisplacementStartFrame ||
-                currentFrame > instance.Definition.DisplacementEndFrame)
+                instance.DisplacementBody == null ||
+                !instance.IsDisplacementWindowOpen)
             {
                 return;
             }

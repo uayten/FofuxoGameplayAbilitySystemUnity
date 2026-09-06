@@ -11,6 +11,8 @@ namespace Fofuxo.GameplayAbilitySystem
         private Vector3 displacementDirection;
         private float displacementRemainingDistance;
         private float displacementRemainingDuration;
+        private int displacementStartFrame = 1;
+        private int displacementEndFrame = int.MaxValue;
 
         public AbilityInstance(AbilityDefinition definition, AbilityContext context)
         {
@@ -33,6 +35,9 @@ namespace Fofuxo.GameplayAbilitySystem
             displacementRemainingDistance > Mathf.Epsilon &&
             displacementRemainingDuration > Mathf.Epsilon &&
             displacementDirection.sqrMagnitude > Mathf.Epsilon;
+        public bool IsDisplacementWindowOpen =>
+            CurrentFrame >= displacementStartFrame &&
+            CurrentFrame <= displacementEndFrame;
         public Rigidbody DisplacementBody { get; private set; }
 
         internal bool Tick(
@@ -91,6 +96,23 @@ namespace Fofuxo.GameplayAbilitySystem
             float distance,
             float duration)
         {
+            BeginDisplacement(
+                direction,
+                body,
+                distance,
+                duration,
+                1,
+                int.MaxValue);
+        }
+
+        internal void BeginDisplacement(
+            Vector3 direction,
+            Rigidbody body,
+            float distance,
+            float duration,
+            int startFrame,
+            int endFrame)
+        {
             displacementDirection = Vector3.ProjectOnPlane(direction, Vector3.up);
             if (displacementDirection.sqrMagnitude <= Mathf.Epsilon)
             {
@@ -104,6 +126,8 @@ namespace Fofuxo.GameplayAbilitySystem
             DisplacementBody = body;
             displacementRemainingDistance = Mathf.Max(0f, distance);
             displacementRemainingDuration = Mathf.Max(0f, duration);
+            displacementStartFrame = Mathf.Max(1, startFrame);
+            displacementEndFrame = Mathf.Max(displacementStartFrame, endFrame);
         }
 
         /// <summary>

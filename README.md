@@ -56,6 +56,7 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Ability-owned displacement windows | |
 | Replication sink hooks, Invulnerable tag | Cue replication |
 | AbilitySystemDebugger readout | Runtime debugger window |
+| Nested Target Assist (circle, cone, facing, startup approach) | General target-data and ability-task graph |
 
 Current limitations are intentional and documented so consumers and
 contributors do not mistake planned APIs for implemented behavior:
@@ -193,6 +194,16 @@ An effect may have a different physical query volume. For melee effects, make
 sure the activation range and effect reach overlap; otherwise an AI can stop at
 a valid activation distance while the hit query still cannot reach the target.
 
+An attack may assign a `TargetAssistDefinition` as its `Nested Assist`. The
+assist runs before the parent animation and effects. It accepts targets anywhere
+inside its proximity circle or inside its forward cone, propagates the chosen
+target and direction into the parent context, snaps facing, and optionally
+approaches during startup until the parent's `Maximum Range` is reached. A zero
+assist `Search Distance` makes the cone reach twice the proximity radius; when
+both values are zero, it falls back to the parent range. Assist-driven approach
+and the parent's own displacement are mutually exclusive until concurrent
+movement tasks are available.
+
 Directional, targetless abilities such as rolls or dashes set
 `Requires Target` to `false` and carry their facing explicitly:
 
@@ -312,6 +323,13 @@ public sealed class MyHealth : MonoBehaviour, IAbilityDamageReceiver
     }
 }
 ```
+
+The current damage effects carry knockback as reaction data in `AbilityHitInfo`;
+the consumer receiver decides whether and how the target moves. In the planned
+GAS-style architecture, numerical damage/status changes become Gameplay Effect
+specifications while a target-owned hit-reaction ability uses a cancellable
+movement task for knockback. Knockback is therefore not intended to become a
+standalone attribute effect. See the [detailed roadmap](Documentation~/ROADMAP.md#knockback-ownership).
 
 ## Costs, charges, buffering, and whiffs
 
@@ -515,118 +533,18 @@ netcode layer. Animation clips can also emit cues without code through
 
 ## Roadmap
 
-### Suggested next steps (from BossRush use)
+The short version:
 
-Do these now, in this order:
+1. Stabilize current lifecycle, validation, and public contracts.
+2. Add Gameplay Effect specs and a complete active-effect lifecycle.
+3. Standardize target data and reusable target queries.
+4. Add cancellable Ability Tasks, then migrate approach and knockback movement.
+5. Expand sequence/input policies, cues, editor tooling, and diagnostics.
+6. Add persistence and optional networking only after local behavior is proven.
 
-- Keep the granted ability tag as the single source of truth for
-  ability-driven states, with callers owning input intent and physics
-  following the ability. BossRush already does this for `State.Rolling`:
-  the roll starts only through `grant.roll`, and `IsRolling` derives from
-  the active ability.
-- Author a `Cue.EnemyAttackTell` trigger on every enemy attack ability, about
-  half a second before the damage frame, and present it from game code so
-  parries are reactions, not guesses.
-- Fire a manual cue on successful parries (`TriggerGameplayCue`) and present
-  hit-stop, flash, or sound from the same presenter path.
-- Visualize enemy query volumes with timed debug-draw shapes
-  (`AbilityDebugDraw` / `DebugDrawEffectDefinition`): one trigger mirroring
-  the damage shape on the damage frame, one tell-colored shape on an earlier
-  frame. Done in the package; wire per enemy attack while tuning parries.
-- Suggested debug follow-ups, in value order: a timestamped per-actor ability
-  event log (started, cancelled with reason, whiffed, parried, cues) for
-  post-fight review; a hit-stop / slow-motion debug toggle for frame-level
-  tell inspection; damage numbers off the existing `Damaged` events; an
-  input-display overlay to correlate presses with activation rejections;
-  a manual-sequence inspector showing step, pending advance, and window
-  deadline for combo tuning.
-- Collision query doctrine for MOBA-scale combat: keep damage as single-frame
-  snapshots at trigger frames (the current model) and never per-frame
-  following sweeps — the legacy sweep-hitbox is the pattern to delete, not
-  to port. Debug-draw lifetimes are visual only and never extend the query.
-  Lingering zones (DOT fields, traps) want a pooled volume with a tick
-  cadence and enter/exit semantics instead of per-frame overlap; that is
-  Phase 5 duration/periodic work — build it on a demonstrated skill need and
-  profile first (the package exposes profiler hooks via the host MCP).
-- Move per-actor combat numbers (Health, Poise, Stamina) toward the planned
-  attribute sets instead of growing bespoke health components.
-- Pool cue VFX presenters instead of instantiating per trigger once combat
-  density grows.
-
-Deliberately later:
-
-- Ability tasks for waits and async movement (Phase 6), which subsume
-  hand-rolled facing-wait code in callers. Animation events already bridge
-  into cues.
-- Player combo migration, now unblocked: manual Grant sequences + input
-  buffering exist. Then migrate block/parry to abilities, and only then
-  delete the legacy `PlayerAttack`/`DamageInfo`/`AttackHitbox` path.
-- Projectile and collider-window effects, infinite effect specs, dynamic
-  cooldowns, and the runtime debugger window.
-- Duration/infinite effects with stacking (Phase 5) for burns, guards, and
-  buffs; costs and cooldowns can migrate onto them afterward.
-- A runtime debugger showing the active ability, frame, tags, cooldowns, and
-  recent cues (Phase 7) — the fastest way to tune tell timing.
-- Cue replication hooks and prediction-safe effect execution only if
-  multiplayer stops being hypothetical.
-
-### Phase 1 — Stabilize the current core
-
-- Expand validation for duplicate IDs, missing loadout entries, invalid ranges,
-  and trigger ordering.
-- Add lifecycle tests for activation, phase transitions, cancellation, cooldowns,
-  tags, and complete sequences.
-- Add a minimal sample scene and package documentation tests.
-- Define compatibility and deprecation rules for public APIs.
-
-### Phase 2 — Sequence policies
-
-- Add automatic and explicit/manual advancement policies.
-- Add input buffering and continuation windows.
-- Expose current step and pending-advance state.
-- Distinguish completed, abandoned, rejected, and interrupted sequences.
-- Keep AI combos automatic while supporting player combos that require one input
-  per step.
-
-### Phase 3 — Effect specifications and targeting
-
-- Introduce runtime effect specifications instead of applying only raw definition data.
-- Add reusable target queries and target collections.
-- Add sphere, box, capsule, collider-window, and projectile-oriented effects.
-- Support effect scaling from source context without mutating definition assets.
-- Add effect-level validation and editor previews.
-
-### Phase 4 — Attributes
-
-- Implement `GameplayAttribute`, `GameplayAttributeValue`, and `AttributeSet`.
-- Register attribute sets with `AbilitySystem`.
-- Add typed lookup, change events, clamping hooks, and instant modifiers.
-- Migrate the sample damage receiver to Health and Poise attributes.
-- Add tests for aggregation order, limits, and source/target context.
-
-### Phase 5 — Active gameplay effects
-
-- Add duration and infinite effects.
-- Add periodic execution, stacking, refresh, overflow, and removal policies.
-- Grant tags from active effects.
-- Add effect handles for querying and removal.
-- Evaluate moving costs and cooldowns onto gameplay effects.
-
-### Phase 6 — Ability tasks and movement
-
-- Add cancellable runtime tasks for waits, animation events, movement, targeting,
-  projectiles, and asynchronous gameplay.
-- Add movement-lock and rotation policies without coupling to a character controller.
-- Improve animation synchronization and interruption hooks.
-
-### Phase 7 — Tooling and production readiness
-
-- Add an active-ability/effect runtime debugger.
-- Improve inspectors, validation summaries, and scene gizmos.
-- Add samples for player input, utility AI, damage, attributes, and status effects.
-- Add profiling coverage and define allocation budgets.
-- Document save/load and multiplayer extension points without claiming built-in
-  networking or prediction.
+See [the detailed development roadmap](Documentation~/ROADMAP.md) for the GAS
+concept mapping, knockback and Target Assist decisions, milestone dependencies,
+deliverables, acceptance criteria, non-goals, and the path to `1.0`.
 
 ## Working with AI agents
 
@@ -635,7 +553,9 @@ conversations. Durable context belongs in versioned files, not chat history.
 
 - [`AGENTS.md`](AGENTS.md) contains repository-wide implementation rules and is
   the first file coding agents should follow.
-- This README describes public behavior, architecture, limitations, and roadmap.
+- This README describes current public behavior and limitations.
+- [`Documentation~/ROADMAP.md`](Documentation~/ROADMAP.md) records architectural
+  direction, priorities, milestones, and acceptance criteria.
 - [`CHANGELOG.md`](CHANGELOG.md) records user-visible changes.
 - Tests preserve behavioral contracts more reliably than prose alone.
 - Future architectural decisions should be stored as short ADRs under
