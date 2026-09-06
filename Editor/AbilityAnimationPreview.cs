@@ -4,28 +4,30 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Inline animation preview for the ability Inspector.
+/// Animation preview for the ability Inspector, drawn in the Inspector's
+/// native bottom preview pane (the same place the clip Inspector shows its
+/// preview), with transport controls in the pane toolbar.
 ///
-/// Renders the preview clip on a hidden model instance with
+/// It renders the preview clip on a hidden model instance with
 /// <see cref="PreviewRenderUtility"/> and poses it with
-/// <see cref="AnimationClip.SampleAnimation"/>. This exists because hosting the
-/// clip's own editor as a nested sub-editor is not supported: the project's
-/// custom clip inspector forwards the preview to Unity's internal
-/// AnimationClipEditor, whose preview state is missing off the main preview
-/// pane and throws a NullReferenceException.
+/// <see cref="AnimationClip.SampleAnimation"/>. Hosting the clip's own editor
+/// as a nested sub-editor is not supported: the project's custom clip
+/// inspector forwards the preview to Unity's internal AnimationClipEditor,
+/// whose preview state is missing off the main preview pane and throws a
+/// NullReferenceException.
 ///
 /// The model is resolved the same way everywhere else in the Fofuxo tooling:
 /// nearest rigged model up from the clip's folder, remembered per folder. The
 /// lookup goes through the animation tools by reflection so this package keeps
 /// no dependency on them; without them (or without a configured model) the
-/// section explains what to do instead of failing.
+/// pane explains what to do instead of failing.
 /// </summary>
 sealed class AbilityAnimationPreview
 {
-    private const float PreviewHeight = 240f;
     private const float CameraMargin = 1.6f;
 
     private static readonly GUIStyle previewBackground = BuildBackground();
+    private static readonly GUIStyle overlayLabel = BuildOverlayLabel();
     private static Func<AnimationClip, GameObject> previewModelGetter;
     private static bool previewModelLookupDone;
 
@@ -33,35 +35,39 @@ sealed class AbilityAnimationPreview
     private GameObject previewInstance;
     private AnimationClip currentClip;
     private GameObject currentModel;
-    private bool playing = true;
+    private GUIContent title;
+    private bool playing;
     private float previewTime;
     private double lastTick;
 
+    public GUIContent Title => title;
+
     /// <summary>
-    /// Draws the transport controls and the rendered preview. Returns true
-    /// while playing so the host editor can keep repainting.
+    /// Resolves the model and builds the preview instance. False when there
+    /// is nothing to show yet; the viewport then draws the reason.
     /// </summary>
-    public bool Draw(AnimationClip clip, int damageFrame)
+    public bool Prepare(AnimationClip clip)
     {
         GameObject model = ResolvePreviewModel(clip);
         if (model == null)
         {
-            EditorGUILayout.HelpBox(
-                "No preview model for this clip. Open the clip and set Preview Model " +
-                "in its Scene Preview block; the choice is remembered for the whole folder.",
-                MessageType.Info);
             DisposeContent();
             return false;
         }
 
         EnsureReady(clip, model);
-        if (previewUtility == null || previewInstance == null)
-        {
-            EditorGUILayout.HelpBox("Animation preview is unavailable.", MessageType.Warning);
-            return false;
-        }
+        return previewUtility != null && previewInstance != null;
+    }
 
-        float length = Mathf.Max(clip.length, 0.001f);
+    /// <summary>
+    /// Transport row for the preview pane toolbar: play toggle plus scrub.
+    /// </summary>
+    public void DrawSettings(AnimationClip clip)
+    {
+        if (!Prepare(clip))
+        {
+            return;
+        }
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -69,14 +75,38 @@ sealed class AbilityAnimationPreview
                 playing,
                 playing ? "Pause" : "Play",
                 EditorStyles.miniButton,
-                GUILayout.Width(60f));
-            float scrubbed = GUILayout.HorizontalSlider(previewTime, 0f, length);
+                GUILayout.Width(64f));
+            float scrubbed = GUILayout.HorizontalSlider(
+                previewTime,
+                0f,
+                ClipLength(clip),
+                GUILayout.ExpandWidth(true));
             if (!Mathf.Approximately(scrubbed, previewTime))
             {
                 previewTime = scrubbed;
             }
         }
+    }
 
+    /// <summary>
+    /// Renders the posed model into the preview pane rect, with a time and
+    /// damage-frame readout overlaid at the bottom. Returns true while
+    /// playing so the host keeps repainting.
+    /// </summary>
+    public bool DrawViewport(Rect rect, AnimationClip clip, int damageFrame)
+    {
+        if (!Prepare(clip))
+        {
+            GUI.Label(
+                rect,
+                "No preview model for this clip.\n" +
+                "Open the clip and set Preview Model in its Scene Preview block;\n" +
+                "the choice is remembered for the whole folder.",
+                overlayLabel);
+            return false;
+        }
+
+        float length = ClipLength(clip);
         if (playing)
         {
             double now = EditorApplication.timeSinceStartup;
@@ -102,11 +132,6 @@ sealed class AbilityAnimationPreview
         // the motion, the timeline owns the travel.
         previewInstance.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
 
-        Rect rect = GUILayoutUtility.GetRect(
-            GUIContent.none,
-            GUIStyle.none,
-            GUILayout.Height(PreviewHeight),
-            GUILayout.ExpandWidth(true));
         if (Event.current.type == EventType.Repaint)
         {
             previewUtility.BeginPreview(rect, previewBackground);
@@ -114,7 +139,7 @@ sealed class AbilityAnimationPreview
             previewUtility.EndPreview();
         }
 
-        DrawTimeLabel(clip, previewTime, length, damageFrame);
+        DrawOverlay(rect, clip, length, damageFrame);
         return playing;
     }
 
@@ -161,10 +186,37 @@ sealed class AbilityAnimationPreview
         }
 
         previewUtility.AddSingleGO(previewInstance);
+        SetupLights();
+
+        title = new GUIContent($"{clip.name} (Ability Preview)");
+        playing = false;
         previewTime = 0f;
         lastTick = 0d;
-        playing = true;
         FrameCamera(clip);
+    }
+
+    private void SetupLights()
+    {
+        // PreviewRenderUtility ships its lights disabled with a black ambient,
+        // which renders an empty black viewport until configured here.
+        previewUtility.ambientColor = new Color(0.3f, 0.3f, 0.3f, 1f);
+
+        Light[] lights = previewUtility.lights;
+        if (lights != null && lights.Length > 0)
+        {
+            lights[0].enabled = true;
+            lights[0].intensity = 1.25f;
+            lights[0].transform.rotation = Quaternion.LookRotation(
+                new Vector3(-0.45f, -0.75f, -0.55f));
+        }
+
+        if (lights != null && lights.Length > 1)
+        {
+            lights[1].enabled = true;
+            lights[1].intensity = 0.45f;
+            lights[1].transform.rotation = Quaternion.LookRotation(
+                new Vector3(0.5f, -0.4f, 0.6f));
+        }
     }
 
     private void FrameCamera(AnimationClip clip)
@@ -197,20 +249,30 @@ sealed class AbilityAnimationPreview
         camera.farClipPlane = distance * 100f;
     }
 
-    private static void DrawTimeLabel(AnimationClip clip, float time, float length, int damageFrame)
+    private void DrawOverlay(Rect rect, AnimationClip clip, float length, int damageFrame)
     {
         float frameRate = Mathf.Max(clip.frameRate, 1f);
         int totalFrames = Mathf.Max(1, Mathf.FloorToInt(length * frameRate));
-        int frame = Mathf.Clamp(Mathf.FloorToInt(time * frameRate), 0, totalFrames);
-        EditorGUILayout.LabelField(
-            $"{time:0.00} s   Frame {frame} / {totalFrames}   ({frameRate:0.#} fps)");
+        int frame = Mathf.Clamp(Mathf.FloorToInt(previewTime * frameRate), 0, totalFrames);
+
+        GUI.Label(
+            new Rect(rect.x, rect.yMax - 30f, rect.width, 15f),
+            $"{previewTime:0.00} s   Frame {frame} / {totalFrames}   ({frameRate:0.#} fps)",
+            overlayLabel);
         if (damageFrame > 0)
         {
             float damageTime = (damageFrame - 1) / frameRate;
             string marker = frame + 1 == damageFrame ? "  ◀ now" : string.Empty;
-            EditorGUILayout.LabelField(
-                $"Damage frame {damageFrame} @ {damageTime:0.00} s{marker}");
+            GUI.Label(
+                new Rect(rect.x, rect.yMax - 15f, rect.width, 15f),
+                $"Damage frame {damageFrame} @ {damageTime:0.00} s{marker}",
+                overlayLabel);
         }
+    }
+
+    private static float ClipLength(AnimationClip clip)
+    {
+        return Mathf.Max(clip.length, 0.001f);
     }
 
     private static GameObject ResolvePreviewModel(AnimationClip clip)
@@ -256,4 +318,12 @@ sealed class AbilityAnimationPreview
         style.normal.background = texture;
         return style;
     }
-}
+
+    private static GUIStyle BuildOverlayLabel()
+    {
+        return new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = Color.white },
+        };
+    }

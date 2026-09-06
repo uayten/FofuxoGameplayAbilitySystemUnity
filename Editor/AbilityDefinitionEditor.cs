@@ -42,7 +42,6 @@ public sealed class AbilityDefinitionEditor : Editor
         }
 
         serializedObject.ApplyModifiedProperties();
-        DrawAnimationPreview(ability);
         DrawResolvedTimeline(ability);
         DrawValidation(ability);
 
@@ -214,46 +213,64 @@ public sealed class AbilityDefinitionEditor : Editor
         }
     }
 
-    private void DrawAnimationPreview(AbilityDefinition ability)
+    public override bool HasPreviewGUI()
     {
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Animation Preview", EditorStyles.boldLabel);
-        if (targets.Length > 1)
+        return targets.Length == 1 &&
+            target is AbilityDefinition ability &&
+            ability.PreviewClip != null;
+    }
+
+    public override GUIContent GetPreviewTitle()
+    {
+        if (target is AbilityDefinition ability && ability.PreviewClip != null)
         {
-            EditorGUILayout.HelpBox(
-                "Select a single ability to preview its animation.",
-                MessageType.Info);
+            animationPreview ??= new AbilityAnimationPreview();
+            if (animationPreview.Title != null)
+            {
+                return animationPreview.Title;
+            }
+        }
+
+        return base.GetPreviewTitle();
+    }
+
+    public override void OnPreviewSettings()
+    {
+        if (target is not AbilityDefinition ability || ability.PreviewClip == null)
+        {
             return;
         }
 
-        AnimationClip clip = ability != null ? ability.PreviewClip : null;
-        if (clip == null)
-        {
-            EditorGUILayout.HelpBox(
-                "Assign an Animation Clip (or a Preview Clip override) to preview it here.",
-                MessageType.Info);
-            return;
-        }
-
-        int damageFrame = 0;
-        if (TryFindDamageTrigger(out SerializedProperty damageTrigger))
-        {
-            damageFrame = Mathf.Max(
-                0,
-                damageTrigger.FindPropertyRelative("frame").intValue);
-        }
-
-        // Self-heals deserialized instances whose field initializers never
-        // ran, so even the live broken inspector recovers on next repaint.
         animationPreview ??= new AbilityAnimationPreview();
+        animationPreview.DrawSettings(ability.PreviewClip);
+    }
 
-        // Rendered here with PreviewRenderUtility: hosting the clip's own
-        // editor as a nested sub-editor throws inside Unity's internal
-        // AnimationClipEditor preview.
-        if (animationPreview.Draw(clip, damageFrame))
+    public override void OnInteractivePreviewGUI(Rect previewRect, GUIStyle background)
+    {
+        if (target is not AbilityDefinition ability || ability.PreviewClip == null)
+        {
+            return;
+        }
+
+        animationPreview ??= new AbilityAnimationPreview();
+        if (animationPreview.DrawViewport(previewRect, ability.PreviewClip, GetDamageFrame()))
         {
             Repaint();
         }
+    }
+
+    private int GetDamageFrame()
+    {
+        if (TryFindDamageTrigger(out SerializedProperty damageTrigger))
+        {
+            SerializedProperty frame = damageTrigger.FindPropertyRelative("frame");
+            if (frame != null)
+            {
+                return Mathf.Max(0, frame.intValue);
+            }
+        }
+
+        return 0;
     }
 
     private static void DrawResolvedTimeline(AbilityDefinition ability)

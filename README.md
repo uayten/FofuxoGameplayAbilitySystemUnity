@@ -182,13 +182,13 @@ path. Keep the Animator state's playback speed aligned with the authored ability
 timeline. If a state plays at a custom speed, rescale the ability frames to keep
 gameplay and animation synchronized.
 
-The Inspector renders an interactive model preview below the ability fields
-(play, scrub, frame readout, damage-frame hint), so the authored motion can be
-checked without leaving the ability asset. `Preview Clip` optionally overrides
-which clip is shown; when it is empty, the gameplay `Animation Clip` is used.
-The model is resolved from the clip's parent folder, like the animation tools'
-scene preview. The preview is editor-only and never changes activation,
-timing, or validation.
+The Inspector's bottom preview pane renders an interactive model preview
+(toolbar play and scrub, frame readout, damage-frame hint), so the authored
+motion can be checked without leaving the ability asset. `Preview Clip`
+optionally overrides which clip is shown; when it is empty, the gameplay
+`Animation Clip` is used. The model is resolved from the clip's parent
+folder, like the animation tools' scene preview. The preview is editor-only
+and never changes activation, timing, or validation.
 
 ### Targeting
 

@@ -2,13 +2,13 @@
 
 ## [Unreleased]
 
-- Added an `Animation Preview` section to the ability Inspector: it renders an
-  interactive model preview (play, scrub, frame readout, damage-frame hint)
-  inside every `AbilityDefinition` editor (inherited by subclasses, no
-  per-ability code required) with an optional per-ability `Preview Clip`
-  override. The model is resolved from the clip's parent folder like the rest
-  of the Fofuxo tooling; the override is editor-only and never affects
-  gameplay timing, validation, or builds.
+- Added an animation preview to the ability Inspector's bottom preview pane:
+  it renders an interactive model preview (toolbar play and scrub, frame
+  readout, damage-frame hint) in every `AbilityDefinition` editor (inherited
+  by subclasses, no per-ability code required) with an optional per-ability
+  `Preview Clip` override. The model is resolved from the clip's parent
+  folder like the rest of the Fofuxo tooling; the override is editor-only
+  and never affects gameplay timing, validation, or builds.
 - Added per-ability `Movement Unlock Frame`, `Combo Continue Frame`, and
   `Combo Input End Frame`. Manual sequences can now retain an early input,
   advance exactly when the authored continuation frame arrives, and expire the
