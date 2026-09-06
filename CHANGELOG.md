@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Fixed the ability Inspector animation viewport rendering and moved its Preview
+  configuration to the final Inspector section for every `AbilityDefinition`
+  subtype.
 - Added an animation preview to the ability Inspector's bottom preview pane:
   it renders an interactive model preview (toolbar play and scrub, frame
   readout, damage-frame hint) in every `AbilityDefinition` editor (inherited

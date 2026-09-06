@@ -146,7 +146,8 @@ sealed class AbilityAnimationPreview
             ApplyCamera();
             previewUtility.BeginPreview(rect, previewBackground);
             previewUtility.Render();
-            previewUtility.EndPreview();
+            Texture previewTexture = previewUtility.EndPreview();
+            GUI.DrawTexture(rect, previewTexture, ScaleMode.StretchToFill, false);
         }
 
         DrawOverlay(rect, clip, length, damageFrame);

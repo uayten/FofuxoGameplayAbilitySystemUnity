@@ -32,20 +32,21 @@ public sealed class AbilityDefinitionEditor : Editor
         serializedObject.Update();
 
         AbilityDefinition ability = (AbilityDefinition)target;
-        if (TryFindDamageTrigger(out SerializedProperty damageTrigger))
+        bool hasDamageTrigger = TryFindDamageTrigger(out SerializedProperty damageTrigger);
+        if (hasDamageTrigger)
         {
             DrawAttackInspector(ability, damageTrigger);
         }
         else
         {
-            DrawDefaultInspector();
+            DrawGenericInspector();
         }
 
         serializedObject.ApplyModifiedProperties();
         DrawResolvedTimeline(ability);
         DrawValidation(ability);
 
-        if (!TryFindDamageTrigger(out _))
+        if (!hasDamageTrigger)
         {
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(AssetDatabase.GetAssetPath(ability))))
             {
@@ -55,6 +56,19 @@ public sealed class AbilityDefinitionEditor : Editor
                 }
             }
         }
+
+        serializedObject.Update();
+        DrawPreviewConfiguration();
+        serializedObject.ApplyModifiedProperties();
+    }
+
+    private void DrawGenericInspector()
+    {
+        Editor.DrawPropertiesExcluding(
+            serializedObject,
+            "m_Script",
+            "previewAnimationClip",
+            "previewModel");
     }
 
     private void DrawAttackInspector(
@@ -69,11 +83,6 @@ public sealed class AbilityDefinitionEditor : Editor
         DrawProperty("animationClip");
         DrawProperty("animatorStateName");
         DrawProperty("animationBlendDuration");
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
-        DrawProperty("previewAnimationClip", "Preview Clip");
-        DrawProperty("previewModel", "Preview Model");
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Combat Frames", EditorStyles.boldLabel);
@@ -140,6 +149,14 @@ public sealed class AbilityDefinitionEditor : Editor
                 DrawProperty("baseAiWeight");
             }
         }
+    }
+
+    private void DrawPreviewConfiguration()
+    {
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
+        DrawProperty("previewAnimationClip", "Preview Clip");
+        DrawProperty("previewModel", "Preview Model");
     }
 
     private void DrawProperty(
