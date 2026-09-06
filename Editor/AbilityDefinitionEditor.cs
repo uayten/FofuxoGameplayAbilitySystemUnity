@@ -7,11 +7,24 @@ public sealed class AbilityDefinitionEditor : Editor
 {
     private bool showDamageBox = true;
     private bool showAdvanced;
-    private readonly AbilityAnimationPreview animationPreview = new();
+
+    // Never inline-initialized: Unity can restore inspector editors via
+    // deserialization without running field initializers, which leaves an
+    // inline-created helper null forever on the live instance.
+    private AbilityAnimationPreview animationPreview;
+
+    private void OnEnable()
+    {
+        animationPreview ??= new AbilityAnimationPreview();
+    }
 
     private void OnDisable()
     {
-        animationPreview.Dispose();
+        if (animationPreview != null)
+        {
+            animationPreview.Dispose();
+            animationPreview = null;
+        }
     }
 
     public override void OnInspectorGUI()
@@ -229,6 +242,10 @@ public sealed class AbilityDefinitionEditor : Editor
                 0,
                 damageTrigger.FindPropertyRelative("frame").intValue);
         }
+
+        // Self-heals deserialized instances whose field initializers never
+        // ran, so even the live broken inspector recovers on next repaint.
+        animationPreview ??= new AbilityAnimationPreview();
 
         // Rendered here with PreviewRenderUtility: hosting the clip's own
         // editor as a nested sub-editor throws inside Unity's internal
