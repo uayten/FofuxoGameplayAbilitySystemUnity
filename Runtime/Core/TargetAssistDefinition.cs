@@ -17,15 +17,15 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class TargetAssistDefinition : AbilityDefinition
     {
         [SerializeField] private LayerMask targetLayers;
-        [Tooltip("Zero uses twice Proximity Radius. If both are zero, the parent ability range is used.")]
+        [Tooltip("Zero uses twice Proximity Radius. If both are zero, target search is disabled.")]
         [SerializeField, Min(0f)] private float searchDistance;
         [SerializeField, Range(0f, 90f)] private float coneHalfAngle = 35f;
         [Tooltip("Enemies inside this radius match regardless of the cone.")]
         [SerializeField, Min(0f)] private float proximityRadius = 4f;
         [Tooltip("Moves the owner toward the chosen target during the parent ability's startup.")]
         [SerializeField] private bool approachTarget = true;
-        [Tooltip("Distance preserved from the chosen target. Zero inherits the parent ability's Maximum Range.")]
-        [SerializeField, Min(0f)] private float stoppingDistance;
+        [Tooltip("Distance preserved from the chosen target during approach.")]
+        [SerializeField, Min(0f)] private float stoppingDistance = 3f;
 
         public int TargetLayerMask => targetLayers.value;
         public float SearchDistance => searchDistance;
@@ -34,7 +34,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public bool ApproachTarget => approachTarget;
         public float StoppingDistance => stoppingDistance;
 
-        internal float ResolveSearchDistance(float parentMaximumRange)
+        internal float ResolveSearchDistance()
         {
             if (searchDistance > Mathf.Epsilon)
             {
@@ -46,14 +46,12 @@ namespace Fofuxo.GameplayAbilitySystem
                 return proximityRadius * 2f;
             }
 
-            return Mathf.Max(0f, parentMaximumRange);
+            return 0f;
         }
 
-        internal float ResolveStoppingDistance(float parentMaximumRange)
+        internal float ResolveStoppingDistance()
         {
-            return stoppingDistance > Mathf.Epsilon
-                ? stoppingDistance
-                : Mathf.Max(0f, parentMaximumRange);
+            return Mathf.Max(0f, stoppingDistance);
         }
 
         public override bool TryValidate(out string error)

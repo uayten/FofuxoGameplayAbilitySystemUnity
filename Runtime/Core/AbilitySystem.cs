@@ -26,6 +26,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private AbilityContext activeSequenceContext;
         private int activeSequenceStep;
         private bool awaitingManualAdvance;
+        private bool queuedSequenceAdvance;
         private float manualAdvanceDeadline;
 
         public AbilityDefinition ActiveAbility => activeInstance?.Definition;
@@ -51,6 +52,9 @@ namespace Fofuxo.GameplayAbilitySystem
         public AbilityPhase? ActivePhase => activeInstance?.CurrentPhase;
         public AbilityContext? ActiveContext => activeInstance?.Context;
         public bool HasActiveDisplacement => activeInstance?.HasActiveDisplacement ?? false;
+        public bool IsMovementLocked =>
+            activeInstance != null &&
+            activeInstance.Definition.IsMovementLockedAtFrame(activeInstance.CurrentFrame);
         public bool IsActive => activeInstance != null;
         public AbilityLoadout Loadout => loadout;
 
@@ -88,7 +92,12 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void Update()
         {
-            TickChargeRestore(Time.deltaTime);
+            Tick(Time.deltaTime);
+        }
+
+        internal void Tick(float deltaTime)
+        {
+            TickChargeRestore(deltaTime);
 
             if (activeInstance == null)
             {
@@ -115,7 +124,7 @@ namespace Fofuxo.GameplayAbilitySystem
             firedCues.Clear();
             try
             {
-                completed = activeInstance.Tick(this, Time.deltaTime, out previousPhase, firedCues);
+                completed = activeInstance.Tick(this, deltaTime, out previousPhase, firedCues);
             }
             catch (Exception exception)
             {
@@ -143,7 +152,14 @@ namespace Fofuxo.GameplayAbilitySystem
                 AbilityPhaseChanged?.Invoke(activeInstance.Definition, activeInstance.CurrentPhase);
             }
 
-            ApplyActiveDisplacement(activeInstance, Time.deltaTime);
+            ApplyActiveDisplacement(activeInstance, deltaTime);
+
+            if (TryProcessQueuedSequenceAdvance())
+            {
+                return;
+            }
+
+            ExpireSequenceInputWindow();
 
             if (completed)
             {
@@ -299,6 +315,41 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
+        /// Records one input for the next step of a manual sequence. During an
+        /// active step, the input is retained until its Combo Continue Frame;
+        /// after the Combo Input End Frame it is rejected. Legacy steps whose
+        /// frame window is zero continue to advance after normal completion.
+        /// </summary>
+        public bool TryQueueSequenceAdvance()
+        {
+            if (activeSequence == null ||
+                activeSequence.Advancement != SequenceAdvancement.Manual ||
+                activeSequenceStep >= activeSequence.Steps.Count - 1)
+            {
+                return false;
+            }
+
+            if (IsAwaitingSequenceAdvance)
+            {
+                return TryAdvanceSequence();
+            }
+
+            if (activeInstance == null)
+            {
+                return false;
+            }
+
+            int inputEndFrame = activeInstance.Definition.ComboInputEndFrame;
+            if (inputEndFrame > 0 && ActiveFrame > inputEndFrame)
+            {
+                return false;
+            }
+
+            queuedSequenceAdvance = true;
+            return true;
+        }
+
+        /// <summary>
         /// Cancels the active ability or a sequence waiting for manual advance.
         /// </summary>
         public bool TryCancelSequence(AbilityCancelReason reason)
@@ -422,15 +473,13 @@ namespace Fofuxo.GameplayAbilitySystem
                 return context;
             }
 
-            float distance = assist.ResolveSearchDistance(ability.MaximumRange);
+            float distance = assist.ResolveSearchDistance();
             if (distance <= Mathf.Epsilon)
             {
                 return context;
             }
 
-            float cone = Mathf.Min(
-                Mathf.Clamp(assist.ConeHalfAngle, 0f, 90f),
-                ability.MaximumFacingAngle);
+            float cone = Mathf.Clamp(assist.ConeHalfAngle, 0f, 90f);
             Vector3 facing = context.Direction;
             if (facing.sqrMagnitude <= Mathf.Epsilon)
             {
@@ -497,7 +546,7 @@ namespace Fofuxo.GameplayAbilitySystem
             owner.transform.rotation = Quaternion.LookRotation(bestDirection, Vector3.up);
             if (assist.ApproachTarget)
             {
-                float stoppingDistance = assist.ResolveStoppingDistance(ability.MaximumRange);
+                float stoppingDistance = assist.ResolveStoppingDistance();
                 approachDistance = Mathf.Max(0f, bestDistance - stoppingDistance);
             }
 
@@ -709,11 +758,23 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 if (activeSequence.Advancement == SequenceAdvancement.Manual)
                 {
+                    if (completedAbility.ComboInputEndFrame > 0 &&
+                        !queuedSequenceAdvance)
+                    {
+                        CancelSequenceOnly(AbilityCancelReason.Manual);
+                        return;
+                    }
+
                     awaitingManualAdvance = true;
                     manualAdvanceDeadline = activeSequence.ManualAdvanceWindow > 0f
                         ? Time.time + activeSequence.ManualAdvanceWindow
                         : float.PositiveInfinity;
                     SequenceAwaitingAdvance?.Invoke(activeSequence, activeSequenceStep);
+                    if (queuedSequenceAdvance)
+                    {
+                        queuedSequenceAdvance = false;
+                        TryAdvanceSequence();
+                    }
                     return;
                 }
 
@@ -767,7 +828,46 @@ namespace Fofuxo.GameplayAbilitySystem
             activeSequenceContext = default;
             activeSequenceStep = 0;
             awaitingManualAdvance = false;
+            queuedSequenceAdvance = false;
             manualAdvanceDeadline = 0f;
+        }
+
+        private bool TryProcessQueuedSequenceAdvance()
+        {
+            if (!queuedSequenceAdvance ||
+                activeSequence == null ||
+                activeInstance == null ||
+                activeSequence.Advancement != SequenceAdvancement.Manual)
+            {
+                return false;
+            }
+
+            int continuationFrame = activeInstance.Definition.ComboContinuationFrame;
+            if (continuationFrame == 0 || ActiveFrame < continuationFrame)
+            {
+                return false;
+            }
+
+            AbilityInstance completedInstance = activeInstance;
+            CompleteActiveAbility();
+            return activeInstance != completedInstance;
+        }
+
+        private void ExpireSequenceInputWindow()
+        {
+            if (queuedSequenceAdvance ||
+                activeSequence == null ||
+                activeInstance == null ||
+                activeSequence.Advancement != SequenceAdvancement.Manual)
+            {
+                return;
+            }
+
+            int inputEndFrame = activeInstance.Definition.ComboInputEndFrame;
+            if (inputEndFrame > 0 && ActiveFrame > inputEndFrame)
+            {
+                CancelSequenceOnly(AbilityCancelReason.Manual);
+            }
         }
 
         private void StartCooldown(AbilityDefinition ability)

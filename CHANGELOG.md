@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Added per-ability `Movement Unlock Frame`, `Combo Continue Frame`, and
+  `Combo Input End Frame`. Manual sequences can now retain an early input,
+  advance exactly when the authored continuation frame arrives, and expire the
+  combo window without cancelling the current attack.
+- Added `AbilitySystem.IsMovementLocked` and `TryQueueSequenceAdvance`, with
+  focused tests for early buffering, frame-gated advancement, movement release,
+  input-window expiration, and post-completion cutoff behavior.
+- Added a compact attack Inspector centered on animation, four combat-frame controls,
+  and inline damage-box authoring. Generic targeting, nested-assist wiring, and
+  other implementation details stay out of the attack's default view.
+- New embedded attack damage effects now default to `BoxDamageEffectDefinition`.
 - Target Assist now resolves before its parent ability, defaults its cone reach
   to twice the proximity radius, propagates the selected target and direction
   into the parent context, and can approach during the parent's startup until

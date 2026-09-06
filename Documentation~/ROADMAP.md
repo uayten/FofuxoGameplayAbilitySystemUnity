@@ -117,7 +117,7 @@ It runs first, without becoming a separately active ability:
 5. Rank valid candidates deterministically by distance with a small angular bias.
 6. Propagate the selected actor and direction into the parent activation context.
 7. Rotate the owner toward the selected target.
-8. Optionally approach during the parent's startup until its `Maximum Range` is reached.
+8. Optionally approach during the parent's startup until the assist's `Stopping Distance` is reached.
 9. Start the parent animation and later execute its attack effects against the resolved target.
 
 The parent remains the owner of cooldown, costs, tags, timeline, animation, hit
@@ -142,7 +142,8 @@ The following capabilities are already available:
 
 - Frame-based ability timelines with startup, active, and recovery phases.
 - Ability and sequence activation, cooldowns, costs, charges, tags, and cancellation reasons.
-- Automatic and manual sequences with input buffering and continuation state.
+- Automatic and manual sequences with frame-gated continuation, early input buffering,
+  input cutoffs, and movement-unlock frames.
 - Directional activation contexts and ability-owned displacement windows.
 - Nested target assist with proximity-circle and frontal-cone selection.
 - Sphere, box, capsule, and area damage query effects.
@@ -283,7 +284,8 @@ Goal: support responsive player combos and deterministic AI/scripted sequences.
 Deliverables:
 
 - Formalize automatic, manual, event-gated, and conditional advancement policies.
-- Add per-step input windows, early buffering, late grace, branch conditions, and timeouts.
+- Extend the shipped per-step frame windows and early buffering with late grace,
+  branch conditions, and richer timeout policies.
 - Preserve one-input-per-step player combos while keeping automatic AI combos.
 - Expose current step, queued intent, deadlines, and last transition reason.
 - Define cancellation propagation between sequence, step, nested prelude, and tasks.

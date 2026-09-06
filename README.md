@@ -42,13 +42,13 @@ for local, single-player combat, but public APIs may evolve before `1.0`.
 | Frame-based startup/active/recovery phases | Duration and infinite effects |
 | Gameplay-tag activation gates | Effect stacking and granted tags |
 | Ability and sequence cooldowns | Ability costs |
-| Automatic sequences | Input-gated/manual sequence advancement |
+| Automatic and manual sequences | Conditional and branching sequences |
 | Input System routing | Ability tasks and movement policies |
 | Sphere-based melee damage effect | Additional targeting and hit shapes |
 | Lifecycle events and cancellation reasons | Runtime debugger and active-effect inspector |
 | Frame-based gameplay cues | Cue replication |
 | Attributes: identifiers, sets, instant modifiers | Duration/infinite effects and stacking |
-| Manual sequence advancement (one input per step) | Combo continuation windows |
+| Frame-gated combo continuation with early input buffering | Conditional combo branches |
 | Box/capsule damage effects, shared target queries | Projectile and collider-window effects |
 | Attribute costs, charges, input buffering | Dynamic cooldowns and cost discounts |
 | Duration modifiers with stacking, regeneration | Infinite effects and effect specs |
@@ -198,9 +198,9 @@ An attack may assign a `TargetAssistDefinition` as its `Nested Assist`. The
 assist runs before the parent animation and effects. It accepts targets anywhere
 inside its proximity circle or inside its forward cone, propagates the chosen
 target and direction into the parent context, snaps facing, and optionally
-approaches during startup until the parent's `Maximum Range` is reached. A zero
+approaches during startup until its own `Stopping Distance` is reached. A zero
 assist `Search Distance` makes the cone reach twice the proximity radius; when
-both values are zero, it falls back to the parent range. Assist-driven approach
+both values are zero, target search is disabled. Assist-driven approach
 and the parent's own displacement are mutually exclusive until concurrent
 movement tasks are available.
 
@@ -298,6 +298,11 @@ collider, prevents duplicate hits for the same trigger, and sends an
 - `Light`, `Heavy`, or `Knockdown` impact.
 - Whether the hit can be parried.
 
+Damage shapes are instantaneous non-allocating physics queries, not temporary
+Collider GameObjects. An attack Inspector exposes its first damage-query trigger
+as `Damage Frame`; changing it also keeps the single-frame startup/active phase
+boundary aligned. Embedded box settings are edited inline under `Damage Box`.
+
 The package deliberately does not provide a health component. Implement the
 receiver in game code:
 
@@ -391,9 +396,18 @@ if (abilitySystem.CanActivateSequence(sequence, context, out string reason))
 }
 ```
 
-The current implementation advances automatically. Planned sequence policies
-will add explicit/manual advancement, buffered input, continuation windows, and
-clear completion versus interruption semantics.
+Manual sequence steps can author three frame windows on their
+`AbilityDefinition`:
+
+- `Movement Unlock Frame`: movement becomes available while the ability may continue.
+- `Combo Continue Frame`: earliest frame that may start the next sequence step.
+- `Combo Input End Frame`: last inclusive frame that accepts the next input.
+
+`TryQueueSequenceAdvance` records an early input during the current step. When
+the continuation frame arrives, the current step completes and the next begins
+without another press. If no input was queued when the input window closes, the
+sequence ends while the current ability is allowed to finish normally. Zero
+frame values preserve the legacy post-completion `TryAdvanceSequence` behavior.
 
 ## Input
 

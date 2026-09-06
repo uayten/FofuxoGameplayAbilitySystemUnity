@@ -128,7 +128,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 SetField(assist, "searchDistance", 0f);
                 SetField(assist, "proximityRadius", 4f);
 
-                Assert.AreEqual(8f, assist.ResolveSearchDistance(3f));
+                Assert.AreEqual(8f, assist.ResolveSearchDistance());
             }
             finally
             {
@@ -197,6 +197,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 SetField(attack, "abilityId", "test.assist.attack");
                 SetField(attack, "requiresTarget", false);
                 SetField(attack, "startupEndFrame", 20);
+                SetField(attack, "activeEndFrame", 21);
                 SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
                 SetField(assist, "targetLayers", MakeMask(1 << target.layer));
                 SetField(assist, "searchDistance", 0f);

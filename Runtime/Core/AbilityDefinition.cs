@@ -49,6 +49,14 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AbilityCancelMask allowedCancellation = AbilityCancelMask.All;
         [SerializeField] private bool lockMovementDuringAbility = true;
 
+        [Header("Action Windows (1-based frames)")]
+        [Tooltip("First frame where owner movement is unlocked. Zero keeps movement locked until the ability completes.")]
+        [SerializeField, Min(0)] private int movementUnlockFrame;
+        [Tooltip("First frame where a buffered manual-sequence input starts the next step. Zero waits for ability completion.")]
+        [SerializeField, Min(0)] private int comboContinuationFrame;
+        [Tooltip("Last inclusive frame that accepts a manual-sequence input. Zero uses the sequence's post-completion window.")]
+        [SerializeField, Min(0)] private int comboInputEndFrame;
+
         [Header("Gameplay Tags")]
         [SerializeField] private GameplayTag[] requiredTags = { };
         [SerializeField] private GameplayTag[] blockedTags = { };
@@ -100,6 +108,9 @@ namespace Fofuxo.GameplayAbilitySystem
         public float ChargeRestoreTime => Mathf.Max(0f, chargeRestoreTime);
         public bool HasLimitedCharges => MaxCharges > 0;
         public bool LockMovementDuringAbility => lockMovementDuringAbility;
+        public int MovementUnlockFrame => Mathf.Max(0, movementUnlockFrame);
+        public int ComboContinuationFrame => Mathf.Max(0, comboContinuationFrame);
+        public int ComboInputEndFrame => Mathf.Max(0, comboInputEndFrame);
         public IReadOnlyList<GameplayTag> RequiredTags => requiredTags;
         public IReadOnlyList<GameplayTag> BlockedTags => blockedTags;
         public IReadOnlyList<GameplayTag> GrantedTags => grantedTags;
@@ -127,6 +138,12 @@ namespace Fofuxo.GameplayAbilitySystem
             return (allowedCancellation & reasonMask) != 0;
         }
 
+        public bool IsMovementLockedAtFrame(int currentFrame)
+        {
+            return LockMovementDuringAbility &&
+                   (MovementUnlockFrame == 0 || currentFrame < MovementUnlockFrame);
+        }
+
         public virtual bool TryValidate(out string error)
         {
             if (string.IsNullOrWhiteSpace(AbilityId))
@@ -144,6 +161,32 @@ namespace Fofuxo.GameplayAbilitySystem
             if (ActiveEndFrame > RecoveryEndFrame)
             {
                 error = "Recovery End Frame must be greater than or equal to Active End Frame.";
+                return false;
+            }
+
+            if (MovementUnlockFrame > RecoveryEndFrame)
+            {
+                error = "Movement Unlock Frame is outside the ability timeline.";
+                return false;
+            }
+
+            if (ComboContinuationFrame > RecoveryEndFrame)
+            {
+                error = "Combo Continue Frame is outside the ability timeline.";
+                return false;
+            }
+
+            if (ComboInputEndFrame > RecoveryEndFrame)
+            {
+                error = "Combo Input End Frame is outside the ability timeline.";
+                return false;
+            }
+
+            if (ComboContinuationFrame > 0 &&
+                ComboInputEndFrame > 0 &&
+                ComboInputEndFrame < ComboContinuationFrame)
+            {
+                error = "Combo Input End Frame must be greater than or equal to Combo Continue Frame.";
                 return false;
             }
 
@@ -196,6 +239,12 @@ namespace Fofuxo.GameplayAbilitySystem
                 if (trigger.Frame > RecoveryEndFrame)
                 {
                     error = $"Effect trigger {i + 1} is outside the ability timeline.";
+                    return false;
+                }
+
+                if (ComboContinuationFrame > 0 && trigger.Frame > ComboContinuationFrame)
+                {
+                    error = $"Effect trigger {i + 1} occurs after the combo continuation frame.";
                     return false;
                 }
             }
@@ -253,6 +302,9 @@ namespace Fofuxo.GameplayAbilitySystem
             cooldown = Mathf.Max(0f, cooldown);
             maxCharges = Mathf.Max(0, maxCharges);
             chargeRestoreTime = Mathf.Max(0f, chargeRestoreTime);
+            movementUnlockFrame = Mathf.Max(0, movementUnlockFrame);
+            comboContinuationFrame = Mathf.Max(0, comboContinuationFrame);
+            comboInputEndFrame = Mathf.Max(0, comboInputEndFrame);
             baseAiWeight = Mathf.Max(0f, baseAiWeight);
             displacementDistance = Mathf.Max(0f, displacementDistance);
             displacementStartFrame = Mathf.Max(1, displacementStartFrame);
@@ -289,6 +341,16 @@ namespace Fofuxo.GameplayAbilitySystem
             displacementDistance = distance;
             displacementStartFrame = startFrame;
             displacementEndFrame = endFrame;
+        }
+
+        internal void ConfigureActionWindowsForTests(
+            int unlockFrame,
+            int continuationFrame,
+            int inputEndFrame)
+        {
+            movementUnlockFrame = unlockFrame;
+            comboContinuationFrame = continuationFrame;
+            comboInputEndFrame = inputEndFrame;
         }
     }
 }
