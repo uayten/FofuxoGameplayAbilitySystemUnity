@@ -311,6 +311,64 @@ public sealed class AbilityDefinitionEditor : Editor
 
         previewClipEditor = CreateEditor(previewClip, editorType);
         previewClipEditorTarget = previewClip;
+        InitializePreviewTimeRange(previewClipEditor, previewClip);
+    }
+
+    private static void InitializePreviewTimeRange(
+        Editor clipEditor,
+        AnimationClip clip)
+    {
+        // A directly inspected AnimationClip receives its playback range from
+        // Unity's Inspector pipeline. A hosted editor does not, so its internal
+        // TimeControl otherwise keeps the one-second default.
+        if (!clipEditor.HasPreviewGUI())
+        {
+            return;
+        }
+
+        const System.Reflection.BindingFlags Flags =
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic;
+
+        System.Reflection.FieldInfo avatarPreviewField =
+            clipEditor.GetType().GetField("m_AvatarPreview", Flags);
+        object avatarPreview = avatarPreviewField?.GetValue(clipEditor);
+        System.Reflection.FieldInfo timeControlField =
+            avatarPreview?.GetType().GetField("timeControl", Flags);
+        object timeControl = timeControlField?.GetValue(avatarPreview);
+        if (timeControl == null)
+        {
+            return;
+        }
+
+        AnimationClipSettings settings =
+            AnimationUtility.GetAnimationClipSettings(clip);
+        System.Type timeControlType = timeControl.GetType();
+        System.Reflection.FieldInfo currentTimeField =
+            timeControlType.GetField("currentTime", Flags);
+        System.Reflection.FieldInfo startTimeField =
+            timeControlType.GetField("startTime", Flags);
+        System.Reflection.FieldInfo stopTimeField =
+            timeControlType.GetField("stopTime", Flags);
+        if (currentTimeField == null ||
+            startTimeField == null ||
+            stopTimeField == null)
+        {
+            return;
+        }
+
+        startTimeField.SetValue(timeControl, settings.startTime);
+        stopTimeField.SetValue(timeControl, settings.stopTime);
+
+        float currentTime = (float)currentTimeField.GetValue(timeControl);
+        if (float.IsNaN(currentTime) ||
+            float.IsInfinity(currentTime) ||
+            currentTime < settings.startTime ||
+            currentTime > settings.stopTime)
+        {
+            currentTimeField.SetValue(timeControl, settings.startTime);
+        }
     }
 
     private void DestroyPreviewClipEditor()

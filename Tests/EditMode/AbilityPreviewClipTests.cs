@@ -63,6 +63,59 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
+        public void HostedNativePreview_UsesFullClipRange()
+        {
+            AbilityDefinition ability =
+                ScriptableObject.CreateInstance<AbilityDefinition>();
+            AnimationClip preview = new AnimationClip
+            {
+                frameRate = 60f,
+            };
+            preview.SetCurve(
+                string.Empty,
+                typeof(Transform),
+                "m_LocalPosition.x",
+                new AnimationCurve(
+                    new Keyframe(0f, 0f),
+                    new Keyframe(2.5f, 1f)));
+
+            UnityEditor.Editor editor = null;
+            try
+            {
+                ability.SetAnimationClipsForTests(null, preview);
+                editor = UnityEditor.Editor.CreateEditor(ability);
+
+                Assert.IsTrue(editor.HasPreviewGUI());
+                object clipEditor = GetRequiredField(editor, "previewClipEditor");
+                Assert.AreEqual(
+                    "UnityEditor.AnimationClipEditor",
+                    clipEditor.GetType().FullName);
+
+                object avatarPreview =
+                    GetRequiredField(clipEditor, "m_AvatarPreview");
+                object timeControl =
+                    GetRequiredField(avatarPreview, "timeControl");
+                float stopTime =
+                    (float)GetRequiredField(timeControl, "stopTime");
+
+                Assert.That(stopTime, Is.EqualTo(preview.length).Within(0.0001f));
+                Assert.That(
+                    stopTime * preview.frameRate,
+                    Is.EqualTo(150f).Within(0.01f));
+            }
+            finally
+            {
+                if (editor != null)
+                {
+                    Object.DestroyImmediate(editor);
+                }
+
+                Object.DestroyImmediate(preview);
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
         public void DerivedAbility_InheritsPreviewClip()
         {
             TargetAssistDefinition ability =
@@ -99,6 +152,21 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 Object.DestroyImmediate(preview);
                 Object.DestroyImmediate(ability);
             }
+        }
+
+        private static object GetRequiredField(object target, string fieldName)
+        {
+            const System.Reflection.BindingFlags Flags =
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic;
+
+            System.Reflection.FieldInfo field =
+                target.GetType().GetField(fieldName, Flags);
+            Assert.IsNotNull(
+                field,
+                $"Expected field '{fieldName}' on {target.GetType().FullName}.");
+            return field.GetValue(target);
         }
     }
 }

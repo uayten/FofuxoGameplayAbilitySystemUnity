@@ -8,6 +8,9 @@
   clip), while the delegated native panel supplies its standard model selector,
   playback controls, and scrubber. Preview authoring never affects gameplay
   timing or validation.
+- Fixed hosted native ability previews to use the authored clip start and stop
+  times instead of the internal `TimeControl` one-second default, so clips
+  longer than 60 frames play and scrub through their complete range.
 - Added per-ability `Movement Unlock Frame`, `Combo Continue Frame`, and
   `Combo Input End Frame`. Manual sequences can now retain an early input,
   advance exactly when the authored continuation frame arrives, and expire the
