@@ -182,6 +182,12 @@ path. Keep the Animator state's playback speed aligned with the authored ability
 timeline. If a state plays at a custom speed, rescale the ability frames to keep
 gameplay and animation synchronized.
 
+The Inspector embeds the clip's interactive animation preview below the ability
+fields, so the authored motion can be checked without leaving the ability asset.
+`Preview Clip` optionally overrides which clip is shown; when it is empty, the
+gameplay `Animation Clip` is used. The preview is editor-only and never changes
+activation, timing, or validation.
+
 ### Targeting
 
 Activation can require a target and validate:

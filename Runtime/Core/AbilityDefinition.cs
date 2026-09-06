@@ -13,6 +13,8 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AnimationClip animationClip;
         [SerializeField] private string animatorStateName;
         [SerializeField, Min(0f)] private float animationBlendDuration = 0.08f;
+        [Tooltip("Optional Inspector preview override. When empty, the Inspector previews Animation Clip. Editor-only: never used by gameplay or builds.")]
+        [SerializeField] private AnimationClip previewAnimationClip;
 
         [Header("Targeting")]
         [SerializeField] private bool requiresTarget = true;
@@ -79,6 +81,15 @@ namespace Fofuxo.GameplayAbilitySystem
         public AnimationClip AnimationClip => animationClip;
         public string AnimatorStateName => animatorStateName ?? string.Empty;
         public float AnimationBlendDuration => Mathf.Max(0f, animationBlendDuration);
+        /// <summary>
+        /// Clip shown by the Inspector animation preview. Prefers the preview
+        /// override and falls back to the gameplay clip. Null when neither is
+        /// assigned. Editor-only: runtime playback always uses
+        /// <see cref="AnimationClip"/>.
+        /// </summary>
+        public AnimationClip PreviewClip =>
+            previewAnimationClip != null ? previewAnimationClip : animationClip;
+        public bool HasAnimationPreview => PreviewClip != null;
         public bool RequiresTarget => requiresTarget;
         public float MinimumRange => Mathf.Max(0f, minimumRange);
         public float MaximumRange => Mathf.Max(MinimumRange, maximumRange);
@@ -329,6 +340,12 @@ namespace Fofuxo.GameplayAbilitySystem
         internal void SetAbilityIdForTests(string id)
         {
             abilityId = id?.Trim();
+        }
+
+        internal void SetAnimationClipsForTests(AnimationClip clip, AnimationClip previewClip)
+        {
+            animationClip = clip;
+            previewAnimationClip = previewClip;
         }
 
         internal void ConfigureDisplacementForTests(

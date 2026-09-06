@@ -2,11 +2,21 @@ using Fofuxo.GameplayAbilitySystem;
 using UnityEditor;
 using UnityEngine;
 
-[CustomEditor(typeof(AbilityDefinition))]
+[CustomEditor(typeof(AbilityDefinition), true)]
 public sealed class AbilityDefinitionEditor : Editor
 {
     private bool showDamageBox = true;
     private bool showAdvanced;
+    private Editor previewClipEditor;
+
+    private void OnDisable()
+    {
+        if (previewClipEditor != null)
+        {
+            DestroyImmediate(previewClipEditor);
+            previewClipEditor = null;
+        }
+    }
 
     public override void OnInspectorGUI()
     {
@@ -23,6 +33,7 @@ public sealed class AbilityDefinitionEditor : Editor
         }
 
         serializedObject.ApplyModifiedProperties();
+        DrawAnimationPreview(ability);
         DrawResolvedTimeline(ability);
         DrawValidation(ability);
 
@@ -50,6 +61,7 @@ public sealed class AbilityDefinitionEditor : Editor
         DrawProperty("animationClip");
         DrawProperty("animatorStateName");
         DrawProperty("animationBlendDuration");
+        DrawProperty("previewAnimationClip", "Preview Clip");
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Combat Frames", EditorStyles.boldLabel);
@@ -191,6 +203,42 @@ public sealed class AbilityDefinitionEditor : Editor
         {
             EditorUtility.SetDirty(effect);
         }
+    }
+
+    private void DrawAnimationPreview(AbilityDefinition ability)
+    {
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Animation Preview", EditorStyles.boldLabel);
+        if (targets.Length > 1)
+        {
+            EditorGUILayout.HelpBox(
+                "Select a single ability to preview its animation.",
+                MessageType.Info);
+            return;
+        }
+
+        AnimationClip clip = ability != null ? ability.PreviewClip : null;
+        if (clip == null)
+        {
+            EditorGUILayout.HelpBox(
+                "Assign an Animation Clip (or a Preview Clip override) to preview it here.",
+                MessageType.Info);
+            return;
+        }
+
+        Editor.CreateCachedEditor(clip, null, ref previewClipEditor);
+        if (previewClipEditor == null)
+        {
+            return;
+        }
+
+        previewClipEditor.OnPreviewSettings();
+        Rect previewRect = GUILayoutUtility.GetRect(
+            GUIContent.none,
+            GUIStyle.none,
+            GUILayout.Height(240f),
+            GUILayout.ExpandWidth(true));
+        previewClipEditor.OnInteractivePreviewGUI(previewRect, GUIStyle.none);
     }
 
     private static void DrawResolvedTimeline(AbilityDefinition ability)
