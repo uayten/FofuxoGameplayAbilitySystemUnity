@@ -11,6 +11,10 @@
 - Fixed hosted native ability previews to use the authored clip start and stop
   times instead of the internal `TimeControl` one-second default, so clips
   longer than 60 frames play and scrub through their complete range.
+- Fixed resolved ability timelines to extend through the assigned gameplay
+  animation's complete frame count. The manual end frame is now a minimum that
+  may extend the ability, while movement unlock and combo windows still permit
+  earlier control and sequence transitions.
 - Added per-ability `Movement Unlock Frame`, `Combo Continue Frame`, and
   `Combo Input End Frame`. Manual sequences can now retain an early input,
   advance exactly when the authored continuation frame arrives, and expire the

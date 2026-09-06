@@ -131,7 +131,7 @@ public sealed class AbilityDefinitionEditor : Editor
             {
                 DrawProperty("cooldown");
                 DrawProperty("cooldownStartPolicy");
-                DrawProperty("recoveryEndFrame", "Ability End Frame");
+                DrawProperty("recoveryEndFrame", "Minimum Ability End Frame");
                 DrawProperty("costs", includeChildren: true);
                 DrawProperty("maxCharges");
                 DrawProperty("chargeRestoreTime");
@@ -387,6 +387,13 @@ public sealed class AbilityDefinitionEditor : Editor
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Resolved Timeline", EditorStyles.boldLabel);
         EditorGUILayout.LabelField("Frame Rate", ability.FrameRate.ToString("0.###"));
+        if (ability.AnimationClip != null)
+        {
+            EditorGUILayout.LabelField(
+                "Animation Frames",
+                ability.AnimationFrameCount.ToString());
+        }
+
         EditorGUILayout.LabelField("Duration", $"{ability.Duration:0.###} s");
         EditorGUILayout.LabelField(
             "Phases",

@@ -25,6 +25,7 @@ namespace Fofuxo.GameplayAbilitySystem
         [Header("Timeline (1-based frames)")]
         [SerializeField, Min(0)] private int startupEndFrame = 1;
         [SerializeField, Min(1)] private int activeEndFrame = 2;
+        [Tooltip("Minimum final frame for the ability. When an Animation Clip is assigned, the resolved timeline extends through the clip's complete duration.")]
         [SerializeField, Min(1)] private int recoveryEndFrame = 60;
         [SerializeField, Min(1f)] private float fallbackFrameRate = 60f;
 
@@ -95,10 +96,14 @@ namespace Fofuxo.GameplayAbilitySystem
         public float MaximumFacingAngle => Mathf.Clamp(maximumFacingAngle, 0f, 180f);
         public int StartupEndFrame => Mathf.Max(0, startupEndFrame);
         public int ActiveEndFrame => Mathf.Max(1, activeEndFrame);
-        public int RecoveryEndFrame => Mathf.Max(1, recoveryEndFrame);
         public float FrameRate => animationClip != null && animationClip.frameRate > Mathf.Epsilon
             ? animationClip.frameRate
             : Mathf.Max(1f, fallbackFrameRate);
+        public int AnimationFrameCount => animationClip != null
+            ? Mathf.Max(1, Mathf.RoundToInt(animationClip.length * FrameRate))
+            : 0;
+        public int RecoveryEndFrame =>
+            Mathf.Max(Mathf.Max(1, recoveryEndFrame), AnimationFrameCount);
         public float Duration => RecoveryEndFrame / FrameRate;
         public float Cooldown => Mathf.Max(0f, cooldown);
         public AbilityCooldownStartPolicy CooldownStartPolicy => cooldownStartPolicy;

@@ -255,6 +255,12 @@ next .. Recovery End Frame    Recovery
 
 Effects trigger once when their configured frame is reached. The custom
 Inspector shows the resolved frame rate, duration, phases, and validation result.
+When an `Animation Clip` is assigned, its complete frame count is the minimum
+resolved end of the recovery phase. `Minimum Ability End Frame` can extend the
+timeline beyond the animation, or supplies the end when there is no clip, but
+cannot cut an assigned animation short. Use `Movement Unlock Frame` and the
+combo windows to release control or continue a sequence before the visual
+animation finishes.
 
 ### Tags and cancellation
 
