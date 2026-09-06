@@ -69,7 +69,11 @@ public sealed class AbilityDefinitionEditor : Editor
         DrawProperty("animationClip");
         DrawProperty("animatorStateName");
         DrawProperty("animationBlendDuration");
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
         DrawProperty("previewAnimationClip", "Preview Clip");
+        DrawProperty("previewModel", "Preview Model");
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Combat Frames", EditorStyles.boldLabel);
@@ -224,11 +228,7 @@ public sealed class AbilityDefinitionEditor : Editor
     {
         if (target is AbilityDefinition ability && ability.PreviewClip != null)
         {
-            animationPreview ??= new AbilityAnimationPreview();
-            if (animationPreview.Title != null)
-            {
-                return animationPreview.Title;
-            }
+            return new GUIContent($"{ability.PreviewClip.name} (Ability Preview)");
         }
 
         return base.GetPreviewTitle();
@@ -242,7 +242,7 @@ public sealed class AbilityDefinitionEditor : Editor
         }
 
         animationPreview ??= new AbilityAnimationPreview();
-        animationPreview.DrawSettings(ability.PreviewClip);
+        animationPreview.DrawSettings(ability.PreviewClip, ability.PreviewModel);
     }
 
     public override void OnInteractivePreviewGUI(Rect previewRect, GUIStyle background)
@@ -253,7 +253,11 @@ public sealed class AbilityDefinitionEditor : Editor
         }
 
         animationPreview ??= new AbilityAnimationPreview();
-        if (animationPreview.DrawViewport(previewRect, ability.PreviewClip, GetDamageFrame()))
+        if (animationPreview.DrawViewport(
+            previewRect,
+            ability.PreviewClip,
+            ability.PreviewModel,
+            GetDamageFrame()))
         {
             Repaint();
         }

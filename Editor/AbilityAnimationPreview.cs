@@ -35,20 +35,23 @@ sealed class AbilityAnimationPreview
     private GameObject previewInstance;
     private AnimationClip currentClip;
     private GameObject currentModel;
-    private GUIContent title;
+    private Vector3 previewCenter;
+    private float previewDistance = 5f;
     private bool playing;
     private float previewTime;
     private double lastTick;
 
-    public GUIContent Title => title;
-
     /// <summary>
-    /// Resolves the model and builds the preview instance. False when there
-    /// is nothing to show yet; the viewport then draws the reason.
+    /// Resolves the model and builds the preview instance. An explicit model
+    /// override wins; otherwise the model comes from the clip's parent
+    /// folder. False when there is nothing to show yet; the viewport then
+    /// draws the reason.
     /// </summary>
-    public bool Prepare(AnimationClip clip)
+    public bool Prepare(AnimationClip clip, GameObject modelOverride)
     {
-        GameObject model = ResolvePreviewModel(clip);
+        GameObject model = modelOverride != null
+            ? modelOverride
+            : ResolvePreviewModel(clip);
         if (model == null)
         {
             DisposeContent();
@@ -62,9 +65,9 @@ sealed class AbilityAnimationPreview
     /// <summary>
     /// Transport row for the preview pane toolbar: play toggle plus scrub.
     /// </summary>
-    public void DrawSettings(AnimationClip clip)
+    public void DrawSettings(AnimationClip clip, GameObject modelOverride)
     {
-        if (!Prepare(clip))
+        if (!Prepare(clip, modelOverride))
         {
             return;
         }
@@ -93,15 +96,18 @@ sealed class AbilityAnimationPreview
     /// damage-frame readout overlaid at the bottom. Returns true while
     /// playing so the host keeps repainting.
     /// </summary>
-    public bool DrawViewport(Rect rect, AnimationClip clip, int damageFrame)
+    public bool DrawViewport(Rect rect, AnimationClip clip, GameObject modelOverride, int damageFrame)
     {
-        if (!Prepare(clip))
+        // Built up front: both branches below draw labels with it.
+        overlayLabel ??= BuildOverlayLabel();
+
+        if (!Prepare(clip, modelOverride))
         {
             GUI.Label(
                 rect,
                 "No preview model for this clip.\n" +
-                "Open the clip and set Preview Model in its Scene Preview block;\n" +
-                "the choice is remembered for the whole folder.",
+                "Set Preview Model in the Preview section above,\n" +
+                "or set it on the clip; empty falls back to the clip's folder.",
                 overlayLabel);
             return false;
         }
@@ -134,6 +140,10 @@ sealed class AbilityAnimationPreview
 
         if (Event.current.type == EventType.Repaint)
         {
+            // Lights and camera are reapplied every frame: BeginPreview resets
+            // camera state behind our back.
+            SetupLights();
+            ApplyCamera();
             previewUtility.BeginPreview(rect, previewBackground);
             previewUtility.Render();
             previewUtility.EndPreview();
@@ -186,13 +196,11 @@ sealed class AbilityAnimationPreview
         }
 
         previewUtility.AddSingleGO(previewInstance);
-        SetupLights();
 
-        title = new GUIContent($"{clip.name} (Ability Preview)");
         playing = false;
         previewTime = 0f;
         lastTick = 0d;
-        FrameCamera(clip);
+        ComputeFraming(clip);
     }
 
     private void SetupLights()
@@ -219,7 +227,7 @@ sealed class AbilityAnimationPreview
         }
     }
 
-    private void FrameCamera(AnimationClip clip)
+    private void ComputeFraming(AnimationClip clip)
     {
         clip.SampleAnimation(previewInstance, 0f);
         previewInstance.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
@@ -239,14 +247,20 @@ sealed class AbilityAnimationPreview
             }
         }
 
-        Camera camera = previewUtility.camera;
         float radius = Mathf.Max(bounds.extents.magnitude, 0.1f);
-        float distance = radius / Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * CameraMargin;
+        previewCenter = bounds.center;
+        previewDistance = radius /
+            Mathf.Tan(previewUtility.camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * CameraMargin;
+    }
+
+    private void ApplyCamera()
+    {
+        Camera camera = previewUtility.camera;
         Vector3 direction = new Vector3(0.5f, 0.35f, 1f).normalized;
-        camera.transform.position = bounds.center + direction * distance;
-        camera.transform.LookAt(bounds.center);
-        camera.nearClipPlane = distance / 100f;
-        camera.farClipPlane = distance * 100f;
+        camera.transform.position = previewCenter + direction * previewDistance;
+        camera.transform.LookAt(previewCenter);
+        camera.nearClipPlane = previewDistance / 100f;
+        camera.farClipPlane = previewDistance * 100f;
     }
 
     private void DrawOverlay(Rect rect, AnimationClip clip, float length, int damageFrame)

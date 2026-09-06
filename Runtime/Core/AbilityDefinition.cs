@@ -13,8 +13,10 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AnimationClip animationClip;
         [SerializeField] private string animatorStateName;
         [SerializeField, Min(0f)] private float animationBlendDuration = 0.08f;
-        [Tooltip("Optional Inspector preview override. When empty, the Inspector previews Animation Clip. Editor-only: never used by gameplay or builds.")]
+        [Tooltip("Preview-only animation. The Inspector preview shows ONLY this clip, never the gameplay clip. Empty means no preview. Editor-only: never used by gameplay or builds.")]
         [SerializeField] private AnimationClip previewAnimationClip;
+        [Tooltip("Preview-only model. When empty, the Inspector resolves the model from the clip's parent folder like the animation tools. Editor-only: never used by gameplay or builds.")]
+        [SerializeField] private GameObject previewModel;
 
         [Header("Targeting")]
         [SerializeField] private bool requiresTarget = true;
@@ -82,14 +84,19 @@ namespace Fofuxo.GameplayAbilitySystem
         public string AnimatorStateName => animatorStateName ?? string.Empty;
         public float AnimationBlendDuration => Mathf.Max(0f, animationBlendDuration);
         /// <summary>
-        /// Clip shown by the Inspector animation preview. Prefers the preview
-        /// override and falls back to the gameplay clip. Null when neither is
-        /// assigned. Editor-only: runtime playback always uses
+        /// Explicit preview-only clip. The Inspector preview shows only this
+        /// clip, never the gameplay clip. Null (the default) means no
+        /// preview. Editor-only: runtime playback always uses
         /// <see cref="AnimationClip"/>.
         /// </summary>
-        public AnimationClip PreviewClip =>
-            previewAnimationClip != null ? previewAnimationClip : animationClip;
+        public AnimationClip PreviewClip => previewAnimationClip;
         public bool HasAnimationPreview => PreviewClip != null;
+        /// <summary>
+        /// Explicit preview-only model override. Null (the default) resolves
+        /// the model from the clip's parent folder. Editor-only: never used
+        /// by gameplay or builds.
+        /// </summary>
+        public GameObject PreviewModel => previewModel;
         public bool RequiresTarget => requiresTarget;
         public float MinimumRange => Mathf.Max(0f, minimumRange);
         public float MaximumRange => Mathf.Max(MinimumRange, maximumRange);
@@ -346,6 +353,11 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             animationClip = clip;
             previewAnimationClip = previewClip;
+        }
+
+        internal void SetPreviewModelForTests(GameObject model)
+        {
+            previewModel = model;
         }
 
         internal void ConfigureDisplacementForTests(

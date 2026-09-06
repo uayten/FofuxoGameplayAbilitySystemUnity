@@ -23,15 +23,17 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void GameplayClipAlone_IsUsedAsPreview()
+        public void GameplayClipAlone_ShowsNoPreview()
         {
             AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
             AnimationClip clip = new AnimationClip();
             try
             {
+                // The preview never shows the gameplay clip on its own: only
+                // an explicitly assigned preview clip is shown.
                 ability.SetAnimationClipsForTests(clip, null);
-                Assert.AreSame(clip, ability.PreviewClip);
-                Assert.IsTrue(ability.HasAnimationPreview);
+                Assert.IsNull(ability.PreviewClip);
+                Assert.IsFalse(ability.HasAnimationPreview);
             }
             finally
             {
@@ -41,7 +43,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void PreviewOverride_TakesPrecedenceOverGameplayClip()
+        public void AssignedPreviewClip_IsUsedAsPreview()
         {
             AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
             AnimationClip clip = new AnimationClip();
@@ -56,6 +58,39 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             {
                 Object.DestroyImmediate(preview);
                 Object.DestroyImmediate(clip);
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
+        public void PreviewModel_DefaultsToNull()
+        {
+            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            try
+            {
+                // Null means the Inspector resolves the model from the clip's
+                // parent folder instead.
+                Assert.IsNull(ability.PreviewModel);
+            }
+            finally
+            {
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
+        public void PreviewModelOverride_IsReturned()
+        {
+            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            GameObject model = new GameObject("PreviewModel");
+            try
+            {
+                ability.SetPreviewModelForTests(model);
+                Assert.AreSame(model, ability.PreviewModel);
+            }
+            finally
+            {
+                Object.DestroyImmediate(model);
                 Object.DestroyImmediate(ability);
             }
         }

@@ -183,12 +183,13 @@ timeline. If a state plays at a custom speed, rescale the ability frames to keep
 gameplay and animation synchronized.
 
 The Inspector's bottom preview pane renders an interactive model preview
-(toolbar play and scrub, frame readout, damage-frame hint), so the authored
-motion can be checked without leaving the ability asset. `Preview Clip`
-optionally overrides which clip is shown; when it is empty, the gameplay
-`Animation Clip` is used. The model is resolved from the clip's parent
-folder, like the animation tools' scene preview. The preview is editor-only
-and never changes activation, timing, or validation.
+(toolbar play and scrub, frame readout, damage-frame hint), so any motion can
+be checked without leaving the ability asset. The Preview section holds an
+explicit `Preview Clip`: put any animation there and press play. It never
+shows the gameplay `Animation Clip` on its own; empty means no preview.
+`Preview Model` optionally pins the rig, and empty resolves it from the
+clip's parent folder, like the animation tools' scene preview. Both fields
+are editor-only and never change activation, timing, or validation.
 
 ### Targeting
 
