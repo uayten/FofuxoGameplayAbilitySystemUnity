@@ -15,8 +15,6 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField, Min(0f)] private float animationBlendDuration = 0.08f;
         [Tooltip("Preview-only animation. The Inspector preview shows ONLY this clip, never the gameplay clip. Empty means no preview. Editor-only: never used by gameplay or builds.")]
         [SerializeField] private AnimationClip previewAnimationClip;
-        [Tooltip("Preview-only model. When empty, the Inspector resolves the model from the clip's parent folder like the animation tools. Editor-only: never used by gameplay or builds.")]
-        [SerializeField] private GameObject previewModel;
 
         [Header("Targeting")]
         [SerializeField] private bool requiresTarget = true;
@@ -91,12 +89,6 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public AnimationClip PreviewClip => previewAnimationClip;
         public bool HasAnimationPreview => PreviewClip != null;
-        /// <summary>
-        /// Explicit preview-only model override. Null (the default) resolves
-        /// the model from the clip's parent folder. Editor-only: never used
-        /// by gameplay or builds.
-        /// </summary>
-        public GameObject PreviewModel => previewModel;
         public bool RequiresTarget => requiresTarget;
         public float MinimumRange => Mathf.Max(0f, minimumRange);
         public float MaximumRange => Mathf.Max(MinimumRange, maximumRange);
@@ -353,11 +345,6 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             animationClip = clip;
             previewAnimationClip = previewClip;
-        }
-
-        internal void SetPreviewModelForTests(GameObject model)
-        {
-            previewModel = model;
         }
 
         internal void ConfigureDisplacementForTests(

@@ -182,14 +182,13 @@ path. Keep the Animator state's playback speed aligned with the authored ability
 timeline. If a state plays at a custom speed, rescale the ability frames to keep
 gameplay and animation synchronized.
 
-The Inspector's bottom preview pane renders an interactive model preview
-(toolbar play and scrub, frame readout, damage-frame hint), so any motion can
-be checked without leaving the ability asset. The Preview section holds an
-explicit `Preview Clip`: put any animation there and press play. It never
-shows the gameplay `Animation Clip` on its own; empty means no preview.
-`Preview Model` optionally pins the rig, and empty resolves it from the
-clip's parent folder, like the animation tools' scene preview. Both fields
-are editor-only and never change activation, timing, or validation.
+The Inspector's bottom preview pane is the same native interactive panel Unity
+shows for a `.anim` asset, including its model selector, playback controls, and
+scrubber. The final Preview section holds an explicit `Preview Clip`: put any
+animation there and use the native panel below. It never shows the gameplay
+`Animation Clip` on its own; empty means no preview. The field lives on the
+base `AbilityDefinition`, so every derived ability gets it without custom
+ability code, and it never changes activation, timing, or validation.
 
 ### Targeting
 

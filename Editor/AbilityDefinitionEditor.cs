@@ -8,23 +8,17 @@ public sealed class AbilityDefinitionEditor : Editor
     private bool showDamageBox = true;
     private bool showAdvanced;
 
-    // Never inline-initialized: Unity can restore inspector editors via
-    // deserialization without running field initializers, which leaves an
-    // inline-created helper null forever on the live instance.
-    private AbilityAnimationPreview animationPreview;
+    private Editor previewClipEditor;
+    private AnimationClip previewClipEditorTarget;
 
     private void OnEnable()
     {
-        animationPreview ??= new AbilityAnimationPreview();
+        UpdatePreviewClipEditor();
     }
 
     private void OnDisable()
     {
-        if (animationPreview != null)
-        {
-            animationPreview.Dispose();
-            animationPreview = null;
-        }
+        DestroyPreviewClipEditor();
     }
 
     public override void OnInspectorGUI()
@@ -59,7 +53,10 @@ public sealed class AbilityDefinitionEditor : Editor
 
         serializedObject.Update();
         DrawPreviewConfiguration();
-        serializedObject.ApplyModifiedProperties();
+        if (serializedObject.ApplyModifiedProperties())
+        {
+            UpdatePreviewClipEditor();
+        }
     }
 
     private void DrawGenericInspector()
@@ -67,8 +64,7 @@ public sealed class AbilityDefinitionEditor : Editor
         Editor.DrawPropertiesExcluding(
             serializedObject,
             "m_Script",
-            "previewAnimationClip",
-            "previewModel");
+            "previewAnimationClip");
     }
 
     private void DrawAttackInspector(
@@ -156,7 +152,6 @@ public sealed class AbilityDefinitionEditor : Editor
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
         DrawProperty("previewAnimationClip", "Preview Clip");
-        DrawProperty("previewModel", "Preview Model");
     }
 
     private void DrawProperty(
@@ -236,62 +231,97 @@ public sealed class AbilityDefinitionEditor : Editor
 
     public override bool HasPreviewGUI()
     {
-        return targets.Length == 1 &&
-            target is AbilityDefinition ability &&
-            ability.PreviewClip != null;
+        UpdatePreviewClipEditor();
+        return previewClipEditor != null && previewClipEditor.HasPreviewGUI();
     }
 
     public override GUIContent GetPreviewTitle()
     {
-        if (target is AbilityDefinition ability && ability.PreviewClip != null)
-        {
-            return new GUIContent($"{ability.PreviewClip.name} (Ability Preview)");
-        }
-
-        return base.GetPreviewTitle();
+        UpdatePreviewClipEditor();
+        return previewClipEditor != null
+            ? previewClipEditor.GetPreviewTitle()
+            : base.GetPreviewTitle();
     }
 
     public override void OnPreviewSettings()
     {
-        if (target is not AbilityDefinition ability || ability.PreviewClip == null)
+        UpdatePreviewClipEditor();
+        if (previewClipEditor != null)
         {
+            previewClipEditor.OnPreviewSettings();
             return;
         }
 
-        animationPreview ??= new AbilityAnimationPreview();
-        animationPreview.DrawSettings(ability.PreviewClip, ability.PreviewModel);
+        base.OnPreviewSettings();
+    }
+
+    public override void OnPreviewGUI(Rect previewRect, GUIStyle background)
+    {
+        UpdatePreviewClipEditor();
+        if (previewClipEditor != null)
+        {
+            previewClipEditor.OnPreviewGUI(previewRect, background);
+            return;
+        }
+
+        base.OnPreviewGUI(previewRect, background);
     }
 
     public override void OnInteractivePreviewGUI(Rect previewRect, GUIStyle background)
     {
-        if (target is not AbilityDefinition ability || ability.PreviewClip == null)
+        UpdatePreviewClipEditor();
+        if (previewClipEditor != null)
+        {
+            previewClipEditor.OnInteractivePreviewGUI(previewRect, background);
+            return;
+        }
+
+        base.OnInteractivePreviewGUI(previewRect, background);
+    }
+
+    public override bool RequiresConstantRepaint()
+    {
+        UpdatePreviewClipEditor();
+        return previewClipEditor != null
+            ? previewClipEditor.RequiresConstantRepaint()
+            : base.RequiresConstantRepaint();
+    }
+
+    private void UpdatePreviewClipEditor()
+    {
+        AnimationClip previewClip = targets.Length == 1 && target is AbilityDefinition ability
+            ? ability.PreviewClip
+            : null;
+        if (previewClipEditor != null && previewClipEditorTarget == previewClip)
         {
             return;
         }
 
-        animationPreview ??= new AbilityAnimationPreview();
-        if (animationPreview.DrawViewport(
-            previewRect,
-            ability.PreviewClip,
-            ability.PreviewModel,
-            GetDamageFrame()))
+        DestroyPreviewClipEditor();
+        if (previewClip == null)
         {
-            Repaint();
+            return;
         }
+
+        System.Type editorType = System.Type.GetType("UnityEditor.AnimationClipEditor, UnityEditor");
+        if (editorType == null)
+        {
+            return;
+        }
+
+        previewClipEditor = CreateEditor(previewClip, editorType);
+        previewClipEditorTarget = previewClip;
     }
 
-    private int GetDamageFrame()
+    private void DestroyPreviewClipEditor()
     {
-        if (TryFindDamageTrigger(out SerializedProperty damageTrigger))
+        if (previewClipEditor != null)
         {
-            SerializedProperty frame = damageTrigger.FindPropertyRelative("frame");
-            if (frame != null)
-            {
-                return Mathf.Max(0, frame.intValue);
-            }
+            DestroyImmediate(previewClipEditor);
+            previewClipEditor = null;
         }
 
-        return 0;
+        previewClipEditorTarget = null;
     }
 
     private static void DrawResolvedTimeline(AbilityDefinition ability)

@@ -63,34 +63,20 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void PreviewModel_DefaultsToNull()
+        public void DerivedAbility_InheritsPreviewClip()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TargetAssistDefinition ability =
+                ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            AnimationClip preview = new AnimationClip();
             try
             {
-                // Null means the Inspector resolves the model from the clip's
-                // parent folder instead.
-                Assert.IsNull(ability.PreviewModel);
+                ability.SetAnimationClipsForTests(null, preview);
+                Assert.AreSame(preview, ability.PreviewClip);
+                Assert.IsTrue(ability.HasAnimationPreview);
             }
             finally
             {
-                Object.DestroyImmediate(ability);
-            }
-        }
-
-        [Test]
-        public void PreviewModelOverride_IsReturned()
-        {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
-            GameObject model = new GameObject("PreviewModel");
-            try
-            {
-                ability.SetPreviewModelForTests(model);
-                Assert.AreSame(model, ability.PreviewModel);
-            }
-            finally
-            {
-                Object.DestroyImmediate(model);
+                Object.DestroyImmediate(preview);
                 Object.DestroyImmediate(ability);
             }
         }
