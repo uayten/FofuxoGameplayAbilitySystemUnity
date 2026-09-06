@@ -2,17 +2,17 @@
 
 ## [Unreleased]
 
-- Fixed the ability Inspector animation viewport rendering and moved its Preview
-  configuration to the final Inspector section for every `AbilityDefinition`
-  subtype.
 - Added an animation preview to the ability Inspector's bottom preview pane:
   it renders an interactive model preview (toolbar play and scrub, frame
   readout, damage-frame hint) in every `AbilityDefinition` editor (inherited
-  by subclasses, no per-ability code required). A dedicated Preview section
-  holds an explicit `Preview Clip` (any animation, never the gameplay clip)
-  and an optional `Preview Model`; an empty model resolves from the clip's
-  parent folder like the rest of the Fofuxo tooling. Both fields are
-  editor-only and never affect gameplay timing, validation, or builds.
+  by subclasses, no per-ability code required). A final Preview section on
+  every subtype holds an explicit `Preview Clip` (any animation, never the
+  gameplay clip) and an optional `Preview Model`; an empty model resolves
+  from the clip's parent folder like the rest of the Fofuxo tooling. Both
+  fields are editor-only and never affect gameplay timing, validation, or
+  builds. (Unity's internal Animation Clip editor cannot be hosted here: it
+  throws inside its own preview when driven as a nested sub-editor, so the
+  pane renders through `PreviewRenderUtility` instead.)
 - Added per-ability `Movement Unlock Frame`, `Combo Continue Frame`, and
   `Combo Input End Frame`. Manual sequences can now retain an early input,
   advance exactly when the authored continuation frame arrives, and expire the
