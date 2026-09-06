@@ -7,15 +7,11 @@ public sealed class AbilityDefinitionEditor : Editor
 {
     private bool showDamageBox = true;
     private bool showAdvanced;
-    private Editor previewClipEditor;
+    private readonly AbilityAnimationPreview animationPreview = new();
 
     private void OnDisable()
     {
-        if (previewClipEditor != null)
-        {
-            DestroyImmediate(previewClipEditor);
-            previewClipEditor = null;
-        }
+        animationPreview.Dispose();
     }
 
     public override void OnInspectorGUI()
@@ -226,19 +222,21 @@ public sealed class AbilityDefinitionEditor : Editor
             return;
         }
 
-        Editor.CreateCachedEditor(clip, null, ref previewClipEditor);
-        if (previewClipEditor == null)
+        int damageFrame = 0;
+        if (TryFindDamageTrigger(out SerializedProperty damageTrigger))
         {
-            return;
+            damageFrame = Mathf.Max(
+                0,
+                damageTrigger.FindPropertyRelative("frame").intValue);
         }
 
-        previewClipEditor.OnPreviewSettings();
-        Rect previewRect = GUILayoutUtility.GetRect(
-            GUIContent.none,
-            GUIStyle.none,
-            GUILayout.Height(240f),
-            GUILayout.ExpandWidth(true));
-        previewClipEditor.OnInteractivePreviewGUI(previewRect, GUIStyle.none);
+        // Rendered here with PreviewRenderUtility: hosting the clip's own
+        // editor as a nested sub-editor throws inside Unity's internal
+        // AnimationClipEditor preview.
+        if (animationPreview.Draw(clip, damageFrame))
+        {
+            Repaint();
+        }
     }
 
     private static void DrawResolvedTimeline(AbilityDefinition ability)
