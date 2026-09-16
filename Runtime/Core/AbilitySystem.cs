@@ -21,6 +21,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly Dictionary<AbilityDefinition, float> charges = new();
         private readonly Dictionary<AbilityDefinition, float> chargeRestoreTimers = new();
 
+        private AbilityAnimationPlayer animationPlayer;
         private AbilityInstance activeInstance;
         private AbilitySequenceDefinition activeSequence;
         private AbilityContext activeSequenceContext;
@@ -90,6 +91,11 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
+        private void OnEnable()
+        {
+            animationPlayer ??= new AbilityAnimationPlayer(animator);
+        }
+
         private void Update()
         {
             Tick(Time.deltaTime);
@@ -97,6 +103,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
         internal void Tick(float deltaTime)
         {
+            animationPlayer?.Tick(deltaTime);
             TickChargeRestore(deltaTime);
 
             if (activeInstance == null)
@@ -178,6 +185,8 @@ namespace Fofuxo.GameplayAbilitySystem
                 CancelSequenceOnly(AbilityCancelReason.Manual);
             }
 
+            animationPlayer?.Dispose();
+            animationPlayer = null;
             looseTags.Clear();
             grantedTagCounts.Clear();
         }
@@ -735,6 +744,7 @@ namespace Fofuxo.GameplayAbilitySystem
             bool tracksHits = completedAbility.EffectTriggers.Count > 0;
             RemoveGrantedTags(completedAbility);
             activeInstance = null;
+            StopAbilityAnimation(completedAbility);
 
             if (completedAbility.CooldownStartPolicy == AbilityCooldownStartPolicy.OnCompletion)
             {
@@ -806,6 +816,7 @@ namespace Fofuxo.GameplayAbilitySystem
             AbilityContext cancelledContext = activeInstance.Context;
             RemoveGrantedTags(cancelledAbility);
             activeInstance = null;
+            StopAbilityAnimation(cancelledAbility);
             AbilityCancelled?.Invoke(cancelledAbility, reason);
             ReplicationSink?.OnAbilityEnded(cancelledAbility, cancelledContext, false);
 
@@ -1090,21 +1101,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void PlayAbilityAnimation(AbilityDefinition ability)
         {
-            if (animator == null ||
-                animator.runtimeAnimatorController == null ||
-                string.IsNullOrWhiteSpace(ability.AnimatorStateName))
-            {
-                return;
-            }
+            animationPlayer ??= new AbilityAnimationPlayer(animator);
+            animationPlayer.Play(
+                ability.AnimationClip,
+                ability.AnimationBlendDuration);
+        }
 
-            string stateName = ability.AnimatorStateName.Contains(".")
-                ? ability.AnimatorStateName
-                : $"{animator.GetLayerName(0)}.{ability.AnimatorStateName}";
-            animator.CrossFadeInFixedTime(
-                stateName,
-                ability.AnimationBlendDuration,
-                0,
-                0f);
+        private void StopAbilityAnimation(AbilityDefinition ability)
+        {
+            animationPlayer?.Stop(ability.AnimationBlendDuration);
         }
     }
 }

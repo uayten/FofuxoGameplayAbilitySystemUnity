@@ -64,6 +64,7 @@ public sealed class AbilityDefinitionEditor : Editor
         Editor.DrawPropertiesExcluding(
             serializedObject,
             "m_Script",
+            "animatorStateName",
             "previewAnimationClip");
     }
 
@@ -77,7 +78,6 @@ public sealed class AbilityDefinitionEditor : Editor
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Animation", EditorStyles.boldLabel);
         DrawProperty("animationClip");
-        DrawProperty("animatorStateName");
         DrawProperty("animationBlendDuration");
 
         EditorGUILayout.Space();

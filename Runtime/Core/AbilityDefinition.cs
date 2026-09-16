@@ -11,7 +11,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
         [Header("Animation")]
         [SerializeField] private AnimationClip animationClip;
-        [SerializeField] private string animatorStateName;
+        [SerializeField, HideInInspector] private string animatorStateName;
         [SerializeField, Min(0f)] private float animationBlendDuration = 0.08f;
         [Tooltip("Preview-only animation. The Inspector preview shows ONLY this clip, never the gameplay clip. Empty means no preview. Editor-only: never used by gameplay or builds.")]
         [SerializeField] private AnimationClip previewAnimationClip;
@@ -80,6 +80,8 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public string AbilityId => abilityId ?? string.Empty;
         public AnimationClip AnimationClip => animationClip;
+        [System.Obsolete(
+            "Animator State Name is no longer used. Animation Clip is the authoritative playback source.")]
         public string AnimatorStateName => animatorStateName ?? string.Empty;
         public float AnimationBlendDuration => Mathf.Max(0f, animationBlendDuration);
         /// <summary>
