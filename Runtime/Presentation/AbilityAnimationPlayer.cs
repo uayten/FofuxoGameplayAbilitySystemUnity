@@ -137,6 +137,7 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
+        /// <summary>Releases the playable graph. Called when the actor tears down.</summary>
         public void Dispose()
         {
             if (graph.IsValid())

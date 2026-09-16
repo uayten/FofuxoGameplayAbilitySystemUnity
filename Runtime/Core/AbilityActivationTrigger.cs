@@ -46,6 +46,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public bool InterruptActiveAbility => interruptActiveAbility;
         public bool RestartsWhenActive => restartWhenActive;
 
+        /// <summary>Whether this trigger answers that event tag.</summary>
         public bool Matches(GameplayTag eventTag)
         {
             return source == AbilityActivationTriggerSource.GameplayEvent &&

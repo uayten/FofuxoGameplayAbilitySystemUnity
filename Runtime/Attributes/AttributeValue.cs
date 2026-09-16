@@ -38,6 +38,10 @@ namespace Fofuxo.GameplayAbilitySystem
         public float MaxValue => maxValue;
         public int ModifierCount => modifiers.Count;
 
+        /// <summary>
+        /// The modifier at this position in the live list, by index and not by
+        /// slot id.
+        /// </summary>
         public AttributeModifier GetModifier(int index) => modifiers[index].Modifier;
 
         public float CurrentValue
@@ -121,6 +125,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return false;
         }
 
+        /// <summary>Detaches the modifier in a slot. False when it was already gone.</summary>
         public bool RemoveModifier(int slot)
         {
             for (int i = 0; i < modifiers.Count; i++)

@@ -43,6 +43,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public double MaxMilliseconds => ToMilliseconds(MaxTicks);
         public double AverageMilliseconds => Count == 0 ? 0d : TotalMilliseconds / Count;
 
+        /// <summary>Clears the counts and timings, so a measurement can start from now.</summary>
         public void Reset()
         {
             Count = 0;
@@ -115,6 +116,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 this.startBytes = startBytes;
             }
 
+            /// <summary>
+            /// Closes the sample and folds its time and allocation into the
+            /// counter.
+            /// </summary>
             public void Dispose()
             {
                 counter?.End(startTicks, startBytes);

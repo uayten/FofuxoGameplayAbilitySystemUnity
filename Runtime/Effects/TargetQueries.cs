@@ -13,7 +13,12 @@ namespace Fofuxo.GameplayAbilitySystem
     /// </summary>
     public static class TargetQueries
     {
-        public static int OverlapReceivers(
+        /// <summary>
+        /// Fills a buffer with the colliders overlapping a sphere on a layer
+        /// mask and returns how many. An empty mask means every layer, and
+        /// triggers count.
+        /// </summary>
+        public static int OverlapColliders(
             Vector3 center,
             float radius,
             int layerMask,
@@ -80,6 +85,7 @@ namespace Fofuxo.GameplayAbilitySystem
                     actor.GetComponentInParent<GameplayEffectContainer>() != null);
         }
 
+        /// <summary>Whether a collider's actor is the target the activation asked for.</summary>
         public static bool MatchesRequestedTarget(
             Transform receiver,
             GameObject requestedTarget)

@@ -35,11 +35,16 @@ namespace Fofuxo.GameplayAbilitySystem
             this.boundAbility = boundAbility;
         }
 
+        /// <summary>
+        /// A task that finishes on the next input press, optionally only for
+        /// one ability's binding.
+        /// </summary>
         public static WaitInputTask Press(AbilityDefinition boundAbility = null)
         {
             return new WaitInputTask(AbilityInputEdge.Pressed, boundAbility);
         }
 
+        /// <summary>A task that finishes on the next input release.</summary>
         public static WaitInputTask Release(AbilityDefinition boundAbility = null)
         {
             return new WaitInputTask(AbilityInputEdge.Released, boundAbility);

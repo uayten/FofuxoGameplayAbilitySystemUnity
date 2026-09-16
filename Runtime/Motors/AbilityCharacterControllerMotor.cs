@@ -33,6 +33,10 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
+        /// <summary>
+        /// Moves the CharacterController and reports the displacement it
+        /// actually achieved.
+        /// </summary>
         public override Vector3 Move(Vector3 delta, AbilityMovementCollision collision)
         {
             if (delta.sqrMagnitude <= Mathf.Epsilon)

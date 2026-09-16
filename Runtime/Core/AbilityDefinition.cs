@@ -249,6 +249,11 @@ namespace Fofuxo.GameplayAbilitySystem
         {
         }
 
+        /// <summary>
+        /// Whether the asset is authored well enough to run, with the first
+        /// problem found in the error. The Inspector and the activation path
+        /// ask the same question.
+        /// </summary>
         public virtual bool TryValidate(out string error)
         {
             if (string.IsNullOrWhiteSpace(AbilityId))

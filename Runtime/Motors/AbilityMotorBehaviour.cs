@@ -18,6 +18,10 @@ namespace Fofuxo.GameplayAbilitySystem
     {
         public virtual Vector3 Position => transform.position;
 
+        /// <summary>
+        /// Moves the owner by a displacement and returns what was actually
+        /// achieved, which is how a blocked push stops short.
+        /// </summary>
         public abstract Vector3 Move(Vector3 delta, AbilityMovementCollision collision);
     }
 }

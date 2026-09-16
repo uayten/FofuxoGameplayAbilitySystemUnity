@@ -52,6 +52,7 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>The step an activation starts on. Never null for a valid ability.</summary>
         public AbilityStep FirstStep => StepAt(0);
 
+        /// <summary>The step at an index, or null when the index is outside the list.</summary>
         public AbilityStep StepAt(int index)
         {
             if (steps == null || steps.Length == 0)
@@ -151,6 +152,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return false;
         }
 
+        /// <summary>
+        /// The base validation plus everything the steps carry, including the
+        /// effects their triggers reach.
+        /// </summary>
         public override bool TryValidate(out string error)
         {
             if (!base.TryValidate(out error))
@@ -222,6 +227,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return true;
         }
 
+        /// <summary>
+        /// A warning for an asset that is valid but will not do what its
+        /// author expects.
+        /// </summary>
         public override bool TryGetAuthoringWarning(out string warning)
         {
             // A timeline with nothing on it is the one shape this type cannot

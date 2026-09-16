@@ -28,6 +28,10 @@ namespace Fofuxo.GameplayAbilitySystem
     {
         private const float DirectionEpsilon = 0.0001f;
 
+        /// <summary>
+        /// The world direction a displacement travels, for a direction mode
+        /// read against the activation's context.
+        /// </summary>
         public static Vector3 ResolveDirection(
             AbilityDisplacementDirection mode,
             AbilityContext context)

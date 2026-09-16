@@ -133,6 +133,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<AbilityEffectTrigger> EffectTriggers => effectTriggers;
         public IReadOnlyList<GameplayCueTrigger> CueTriggers => cueTriggers;
 
+        /// <summary>Which phase a frame falls in: startup, active or recovery.</summary>
         public AbilityPhase GetPhase(int currentFrame)
         {
             if (currentFrame <= StartupEndFrame)
@@ -182,6 +183,11 @@ namespace Fofuxo.GameplayAbilitySystem
                    currentFrame <= ComboInputDeadlineFrame;
         }
 
+        /// <summary>
+        /// Whether the step is authored well enough to run. The step number
+        /// appears in the message, so an ability can report which of its steps
+        /// is wrong.
+        /// </summary>
         public bool TryValidate(int stepNumber, out string error)
         {
             if (ActiveEndFrame <= StartupEndFrame)
@@ -332,6 +338,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return nextStepIndex;
         }
 
+        /// <summary>
+        /// Clamps the authored frames and durations into a timeline that makes
+        /// sense, keeping each bound at or after the one before it.
+        /// </summary>
         public void Sanitize()
         {
             startupEndFrame = Mathf.Max(0, startupEndFrame);

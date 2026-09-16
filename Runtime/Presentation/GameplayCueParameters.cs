@@ -96,6 +96,10 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public bool IsPersistent => Event != GameplayCueEvent.Execute;
 
+        /// <summary>
+        /// A copy presenting a different cue tag, for a filter or a
+        /// replacement.
+        /// </summary>
         public GameplayCueParameters WithCue(GameplayTag cue)
         {
             return new GameplayCueParameters(
@@ -103,6 +107,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 Magnitude, StackCount, Context, Hit, Location, Normal);
         }
 
+        /// <summary>A copy for another moment of the same cue's life, under a handle.</summary>
         public GameplayCueParameters WithEvent(GameplayCueEvent cueEvent, GameplayCueHandle handle)
         {
             return new GameplayCueParameters(
@@ -110,6 +115,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 Magnitude, StackCount, Context, Hit, Location, Normal);
         }
 
+        /// <summary>A copy carrying a different outcome.</summary>
         public GameplayCueParameters WithOutcome(GameplayCueOutcome outcome)
         {
             return new GameplayCueParameters(
@@ -117,6 +123,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 Magnitude, StackCount, Context, Hit, Location, Normal);
         }
 
+        /// <summary>A copy carrying a different stack count.</summary>
         public GameplayCueParameters WithStackCount(int stackCount)
         {
             return new GameplayCueParameters(
@@ -124,6 +131,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 Magnitude, stackCount, Context, Hit, Location, Normal);
         }
 
+        /// <summary>A copy carrying a different magnitude.</summary>
         public GameplayCueParameters WithMagnitude(float magnitude)
         {
             return new GameplayCueParameters(
@@ -131,6 +139,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 magnitude, StackCount, Context, Hit, Location, Normal);
         }
 
+        /// <summary>A copy placed at another point, with the surface normal there.</summary>
         public GameplayCueParameters WithLocation(Vector3 location, Vector3 normal)
         {
             return new GameplayCueParameters(

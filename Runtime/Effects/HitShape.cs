@@ -96,6 +96,7 @@ namespace Fofuxo.GameplayAbilitySystem
         public float ConeHalfAngle => Mathf.Clamp(coneHalfAngle, 0f, 180f);
         public float ConeInnerRadius => Mathf.Max(0f, coneInnerRadius);
 
+        /// <summary>A sphere around a point in the owner's local space.</summary>
         public static HitShape Sphere(Vector3 localCenter, float radius)
         {
             return new HitShape
@@ -129,6 +130,10 @@ namespace Fofuxo.GameplayAbilitySystem
             };
         }
 
+        /// <summary>
+        /// A ray between two points in the owner's local space, on a layer
+        /// mask.
+        /// </summary>
         public static HitShape Ray(int layerMask, Vector3 localStart, Vector3 localEnd)
         {
             return new HitShape
@@ -276,6 +281,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return found;
         }
 
+        /// <summary>Clamps the authored shape fields into their legal ranges.</summary>
         public void Sanitize()
         {
             radius = Mathf.Max(0.05f, radius);

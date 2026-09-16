@@ -119,6 +119,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return data;
         }
 
+        /// <summary>
+        /// Empties the acquisition so the buffer can be reused for the next
+        /// trigger frame.
+        /// </summary>
         public void Clear()
         {
             hits.Clear();
@@ -155,6 +159,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return removed;
         }
 
+        /// <summary>Whether this actor is among the targets acquired.</summary>
         public bool Contains(GameObject actor)
         {
             if (actor == null)

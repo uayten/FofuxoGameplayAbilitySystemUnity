@@ -22,6 +22,7 @@ useful authoring tools.
 - [Delivery order](#delivery-order)
 - [Milestone 1 — The 1.0 surface](#milestone-1--the-10-surface)
 - [Blocked on a consumer](#blocked-on-a-consumer)
+- [What waits on a play test](#what-waits-on-a-play-test)
 - [Non-goals](#non-goals)
 
 ## Orientation for an agent picking this up
@@ -191,12 +192,14 @@ and `CHANGELOG.md` describe them. What is left is what actually declares `1.0`.
 
 Deliverables:
 
-- **The public API documentation that is still missing.** Every public type is
-  documented and a test keeps it that way, and the members of the five types a
-  consumer calls in code are documented too. What is left is ~360 members that
-  are almost all serialized authoring fields: the Inspector explains them with a
-  `Tooltip` and the field tables list them, so the decision before `1.0` is
-  whether a third copy in XML earns its keep - not to write it by default.
+- **The public API documentation that is still missing.** Every public type,
+  every public method and every member of the five types a consumer calls in
+  code are documented, and a test keeps the types that way. What is left is
+  275 properties: 182 of them mirror a serialized field the Inspector already
+  explains with a `Tooltip` and the skill tables already list, and ~93 are
+  computed reads (`IsEmpty`, `IsAccepted`, clamped getters). The question
+  before `1.0` is whether a third copy of the field tooltips earns its keep;
+  the computed ones probably do.
 - **The version itself**: `package.json` to `1.0.0`, the changelog heading
   dated, the tag, and the README's "no compatibility promise" section replaced
   by the policy in `Documentation~/RELEASE_CHECKLIST.md`.
@@ -238,6 +241,26 @@ invented against nothing. Build it when the trigger fires, not before.
   `GameplayAttribute` identifier today. *Trigger:* a consumer with enough
   attributes that the identifiers become the authoring cost, plus a measured
   benefit — codegen is a non-goal without one.
+
+## What waits on a play test
+
+The package is verified by 584 EditMode tests and by validation that runs the
+runtime's own rules. Neither can tell whether something *feels* right, and
+nothing below is a bug report - it is the list of what has never been played.
+
+- **The Melee Combat sample.** Import it, open `Scenes/MeleeCombat.unity`, and
+  play. What to watch, in the order it usually needs tuning: the combo window
+  (does the second press land where the hand expects?), the roll's i-frame
+  window against the enemy's swing, the parry window at ten frames, the
+  knockback distance of the third step, and the enemy brain's decision interval.
+  Everything on that list is a number in an asset.
+- **The profiling scene**, `Scenes/Profiling.unity`: raise `Pair Count` until the
+  frame rate moves, and read the counters against
+  [`PERFORMANCE.md`](PERFORMANCE.md).
+- **Persistence, once a game saves with it.** The round trip, the three offline
+  policies and the migration chain are covered by tests; what no test covers is
+  a real session closed and reopened, which only exists when the day/night
+  ability does.
 
 ## Non-goals
 

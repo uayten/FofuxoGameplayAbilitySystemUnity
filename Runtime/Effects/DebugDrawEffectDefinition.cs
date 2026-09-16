@@ -44,6 +44,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return true;
         }
 
+        /// <summary>
+        /// The base validation, minus the target-layer rule: this effect draws
+        /// a shape rather than querying with it.
+        /// </summary>
         public override bool TryValidate(out string error)
         {
             if (!base.TryValidate(out error))

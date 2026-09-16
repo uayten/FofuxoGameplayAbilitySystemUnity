@@ -79,6 +79,7 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public static event Action<AbilitySystem, AbilityEvent> EventRecorded;
 
+        /// <summary>Clears all three counters at once.</summary>
         public static void ResetCounters()
         {
             TargetQueries.Reset();

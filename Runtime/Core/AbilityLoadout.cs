@@ -62,11 +62,16 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public IReadOnlyList<AbilityDefinition> Abilities => abilities;
 
+        /// <summary>Whether this ability is granted.</summary>
         public bool Contains(AbilityDefinition ability)
         {
             return ability != null && Array.IndexOf(abilities, ability) >= 0;
         }
 
+        /// <summary>
+        /// The granted ability with this id, or null. The id is the asset's
+        /// abilityId, never its file name.
+        /// </summary>
         public AbilityDefinition FindAbility(string abilityId)
         {
             if (string.IsNullOrWhiteSpace(abilityId))

@@ -102,6 +102,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 velocityChange, reactionAbility, application);
         }
 
+        /// <summary>
+        /// The base validation plus what a push needs: a curve that produces
+        /// velocity, and an event for the target to answer.
+        /// </summary>
         public override bool TryValidate(out string error)
         {
             if (!base.TryValidate(out error))
@@ -133,6 +137,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return true;
         }
 
+        /// <summary>
+        /// The velocity change this effect applies at a level, along a
+        /// resolved direction.
+        /// </summary>
         public Vector3 ResolveVelocityChange(int level, Vector3 forceDirection)
         {
             int resolvedLevel = Mathf.Clamp(level, 1, 100);

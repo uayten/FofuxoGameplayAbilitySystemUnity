@@ -90,6 +90,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return this;
         }
 
+        /// <summary>The registered ability with this id, or null.</summary>
         public AbilityDefinition ResolveAbility(string abilityId)
         {
             return !string.IsNullOrWhiteSpace(abilityId) &&
@@ -98,6 +99,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 : null;
         }
 
+        /// <summary>The registered effect with this id, or null.</summary>
         public GameplayEffectDefinition ResolveEffect(string effectId)
         {
             return !string.IsNullOrWhiteSpace(effectId) &&

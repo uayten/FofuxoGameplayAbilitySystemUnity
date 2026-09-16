@@ -90,6 +90,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return Mathf.Max(0f, stoppingGap);
         }
 
+        /// <summary>Whether the assist is authored well enough to acquire anything.</summary>
         public bool TryValidate(out string error)
         {
             if (searchDistance < 0f || proximityRadius < 0f || stoppingGap < 0f)

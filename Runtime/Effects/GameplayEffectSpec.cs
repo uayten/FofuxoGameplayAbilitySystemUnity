@@ -165,6 +165,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return this;
         }
 
+        /// <summary>
+        /// Adds a modifier to this application from its three parts, for code
+        /// that has no asset to author one on.
+        /// </summary>
         public GameplayEffectSpec AddDynamicModifier(
             GameplayAttribute attribute, AttributeOperation operation, float magnitude)
         {
@@ -190,6 +194,10 @@ namespace Fofuxo.GameplayAbilitySystem
         public int ModifierCount =>
             (Definition != null ? Definition.Modifiers.Count : 0) + dynamicModifiers.Count;
 
+        /// <summary>
+        /// The modifier at an index across the asset's own and this
+        /// application's dynamic ones.
+        /// </summary>
         public GameplayEffectModifier GetModifier(int index)
         {
             int authored = Definition != null ? Definition.Modifiers.Count : 0;

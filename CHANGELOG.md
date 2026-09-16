@@ -17,10 +17,15 @@ Two of the three things the `1.0` milestone still wanted.
   `UnityEditor.Editor` spelled out.
 - **Documented the members of the types a consumer calls in code**: 58 of them
   across `AbilitySystem`, `AttributeSet`, `GameplayEffectContainer`,
-  `AbilityInstance` and `GameplayCueDispatcher`. The remaining ~360 public
-  members are almost all serialized authoring fields, which the Inspector
-  already explains with a `Tooltip` and the field tables document; they are
-  left rather than duplicated a third time.
+  `AbilityInstance` and `GameplayCueDispatcher`.
+- **Documented every public method in the runtime** - 83 more, from the
+  validation entry points and the `AbilityEvent` factories to the motors, the
+  cue parameter copies and the target filter builders. What is left is 275
+  properties, 182 of which mirror a serialized field that already carries a
+  `Tooltip`; the roadmap asks whether a third copy of those earns its keep.
+- **Breaking: `TargetQueries.OverlapReceivers` is now `OverlapColliders`.** It
+  was named after a concept the package removed - receivers are gone - and it
+  returns colliders. Nothing called it.
 
 ### A sample that runs the whole loop, and the promises around it (Milestone 1)
 

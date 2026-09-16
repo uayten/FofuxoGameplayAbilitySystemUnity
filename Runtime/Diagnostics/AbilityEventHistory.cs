@@ -54,6 +54,7 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>Fires after an entry lands in the ring.</summary>
         public event Action<AbilityEvent> Recorded;
 
+        /// <summary>Appends an event, overwriting the oldest one once the ring is full.</summary>
         public void Record(in AbilityEvent recorded)
         {
             int slot = (start + Count) % ring.Length;
@@ -71,6 +72,7 @@ namespace Fofuxo.GameplayAbilitySystem
             Recorded?.Invoke(recorded);
         }
 
+        /// <summary>Empties the ring without releasing it.</summary>
         public void Clear()
         {
             Array.Clear(ring, 0, ring.Length);

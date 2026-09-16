@@ -35,6 +35,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public bool IsAccepted => Rejection == AbilityActivationRejection.None;
 
+        /// <summary>A refusal, carrying the typed reason and a message for a human.</summary>
         public static AbilityActivationResult Rejected(
             AbilityActivationRejection rejection, string message)
         {

@@ -57,6 +57,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return copy;
         }
 
+        /// <summary>A copy that accepts at most this many targets. Zero is unlimited.</summary>
         public AbilityTargetFilter WithMaximumCount(int count)
         {
             AbilityTargetFilter copy = this;
@@ -64,6 +65,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return copy;
         }
 
+        /// <summary>A copy that only accepts targets holding all of these tags.</summary>
         public AbilityTargetFilter WithRequiredTags(params GameplayTag[] tags)
         {
             AbilityTargetFilter copy = this;
@@ -71,6 +73,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return copy;
         }
 
+        /// <summary>A copy that refuses targets holding any of these tags.</summary>
         public AbilityTargetFilter WithBlockedTags(params GameplayTag[] tags)
         {
             AbilityTargetFilter copy = this;
@@ -78,6 +81,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return copy;
         }
 
+        /// <summary>A copy that decides whether an actor holding State.Dead counts.</summary>
         public AbilityTargetFilter WithDead(bool include)
         {
             AbilityTargetFilter copy = this;
@@ -85,6 +89,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return copy;
         }
 
+        /// <summary>
+        /// A copy that decides whether a collider with no gameplay state above
+        /// it counts.
+        /// </summary>
         public AbilityTargetFilter WithNonActors(bool include)
         {
             AbilityTargetFilter copy = this;

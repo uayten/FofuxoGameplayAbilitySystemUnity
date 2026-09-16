@@ -96,6 +96,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return Mathf.Max(1, Mathf.RoundToInt(amount * fade));
         }
 
+        /// <summary>
+        /// The base validation plus what damage needs: an attribute to
+        /// subtract from, and a query that can find someone.
+        /// </summary>
         public override bool TryValidate(out string error)
         {
             if (!base.TryValidate(out error))

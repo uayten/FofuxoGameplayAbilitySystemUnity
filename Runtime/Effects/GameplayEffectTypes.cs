@@ -130,6 +130,10 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public bool IsLive => CapturesAttribute && !snapshot;
 
+        /// <summary>
+        /// The level curve's value at a level, or one when no curve was
+        /// authored.
+        /// </summary>
         public float LevelMultiplier(int level)
         {
             return byLevel != null && byLevel.length > 0
@@ -161,6 +165,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return magnitude;
         }
 
+        /// <summary>Clamps the authored magnitude fields into their legal ranges.</summary>
         public void Sanitize()
         {
             if (byLevel != null && byLevel.length == 0)
@@ -254,6 +259,10 @@ namespace Fofuxo.GameplayAbilitySystem
             clearStackOnOverflow = false,
         };
 
+        /// <summary>
+        /// A stacking policy built in code, for a spec with no asset behind
+        /// it.
+        /// </summary>
         public static GameplayEffectStacking With(
             EffectStacking policy,
             int limit = 0,
@@ -266,6 +275,10 @@ namespace Fofuxo.GameplayAbilitySystem
             return stacking;
         }
 
+        /// <summary>
+        /// A copy that overflows into the given effects once the limit is
+        /// reached.
+        /// </summary>
         public GameplayEffectStacking WithOverflow(
             GameplayEffectDefinition[] effects,
             bool denyApplication = false,
@@ -314,6 +327,10 @@ namespace Fofuxo.GameplayAbilitySystem
             maximumTargets = 1,
         };
 
+        /// <summary>
+        /// Targeting that queries a shape, rather than reaching the owner or
+        /// the ability's target.
+        /// </summary>
         public static GameplayEffectTargeting FromShape(
             HitShape shape,
             int maximumTargets = 3,
@@ -339,6 +356,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return targeting;
         }
 
+        /// <summary>A copy that uses this filter.</summary>
         public GameplayEffectTargeting WithFilter(AbilityTargetFilter targetFilter)
         {
             GameplayEffectTargeting targeting = this;
@@ -355,6 +373,7 @@ namespace Fofuxo.GameplayAbilitySystem
             return restrictToAbilityTarget ? filter.RestrictedTo(requestedTarget) : filter;
         }
 
+        /// <summary>Clamps the authored targeting fields into their legal ranges.</summary>
         public void Sanitize()
         {
             shape.Sanitize();

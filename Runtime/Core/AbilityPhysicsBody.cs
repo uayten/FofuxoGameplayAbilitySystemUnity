@@ -117,6 +117,12 @@ namespace Fofuxo.GameplayAbilitySystem
             TickPhysicsControl(Time.fixedDeltaTime, IsGrounded());
         }
 
+        /// <summary>
+        /// Hands the actor to physics for the given reaction ability and
+        /// applies a velocity change, replacing or accumulating what the body
+        /// had. A different reaction takes over from the one running. False
+        /// when there is no Rigidbody, or no reaction to own the control.
+        /// </summary>
         public bool ApplyVelocityChange(
             Vector3 velocityChange,
             AbilityDefinition activeReactionAbility,

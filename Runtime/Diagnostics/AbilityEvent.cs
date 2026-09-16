@@ -130,6 +130,10 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public string Message { get; }
 
+        /// <summary>
+        /// An activation was refused, with the typed rejection that refused
+        /// it.
+        /// </summary>
         public static AbilityEvent Rejected(
             AbilityDefinition ability, in AbilityActivationResult result)
         {
@@ -145,6 +149,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 result.Message);
         }
 
+        /// <summary>An activation began, on a step and against a target.</summary>
         public static AbilityEvent Started(AbilityDefinition ability, int stepIndex, GameObject target)
         {
             return new AbilityEvent(
@@ -159,6 +164,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>A step transition, with the reason it happened.</summary>
         public static AbilityEvent Transitioned(in AbilityStepTransition transition)
         {
             return new AbilityEvent(
@@ -173,6 +179,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>An activation completed on its own terms.</summary>
         public static AbilityEvent Completed(
             AbilityDefinition ability, int stepIndex, AbilityStepTransitionReason reason)
         {
@@ -188,6 +195,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>An activation was cancelled, with the tag that named the reason.</summary>
         public static AbilityEvent Cancelled(
             AbilityDefinition ability,
             int stepIndex,
@@ -206,6 +214,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>An activation ended without hitting anything.</summary>
         public static AbilityEvent Whiffed(AbilityDefinition ability)
         {
             return new AbilityEvent(
@@ -220,6 +229,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>A cue was raised.</summary>
         public static AbilityEvent Cue(AbilityDefinition ability, GameplayTag cue)
         {
             return Cue(ability, cue, null);
@@ -240,6 +250,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 message);
         }
 
+        /// <summary>A gameplay event arrived, and who sent it.</summary>
         public static AbilityEvent GameplayEventReceived(GameplayTag eventTag, GameObject sender)
         {
             return new AbilityEvent(
@@ -254,6 +265,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>
+        /// An effect was delivered by an ability, and whether it found a
+        /// target.
+        /// </summary>
         public static AbilityEvent Delivered(
             AbilityDefinition ability,
             GameplayEffectDefinition effect,
@@ -272,6 +287,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>
+        /// An effect was applied to this actor, with the outcome the container
+        /// returned.
+        /// </summary>
         public static AbilityEvent Applied(
             GameplayEffectDefinition effect,
             GameObject source,
@@ -289,6 +308,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 Describe(outcome));
         }
 
+        /// <summary>
+        /// An effect was refused on this actor, with the outcome that refused
+        /// it.
+        /// </summary>
         public static AbilityEvent Blocked(
             GameplayEffectDefinition effect,
             GameObject source,
@@ -306,6 +329,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 Describe(outcome));
         }
 
+        /// <summary>An active effect was removed from this actor.</summary>
         public static AbilityEvent Removed(GameplayEffectDefinition effect, GameObject source)
         {
             return new AbilityEvent(
@@ -320,6 +344,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 null);
         }
 
+        /// <summary>A task started inside an activation.</summary>
         public static AbilityEvent TaskStarted(AbilityDefinition ability, AbilityTask task)
         {
             return new AbilityEvent(
@@ -334,6 +359,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 task == null ? null : task.GetType().Name);
         }
 
+        /// <summary>A task ended.</summary>
         public static AbilityEvent TaskEnded(AbilityDefinition ability, AbilityTask task)
         {
             return new AbilityEvent(

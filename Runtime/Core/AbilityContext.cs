@@ -25,6 +25,11 @@ namespace Fofuxo.GameplayAbilitySystem
         public Vector3 Direction { get; }
         public Vector3 AimPoint { get; }
 
+        /// <summary>
+        /// A context for an owner acting on a target: the direction runs from
+        /// one to the other, and the aim point is where the target stands.
+        /// With no target it falls back to the owner's forward.
+        /// </summary>
         public static AbilityContext FromTarget(GameObject owner, GameObject target)
         {
             Vector3 direction = owner != null && target != null

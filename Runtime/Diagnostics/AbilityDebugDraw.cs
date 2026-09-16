@@ -122,6 +122,7 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        /// <summary>Draws a line in the Scene view for a number of seconds.</summary>
         public static void Line(Vector3 start, Vector3 end, Color color, float duration = 1f)
         {
             if (!Enabled || duration <= 0f)
@@ -133,6 +134,7 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        /// <summary>Draws a wire sphere in the Scene view for a number of seconds.</summary>
         public static void Sphere(Vector3 center, float radius, Color color, float duration = 1f)
         {
             if (!Enabled || radius <= Mathf.Epsilon || duration <= 0f)
@@ -146,6 +148,7 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        /// <summary>Draws a wire box in the Scene view for a number of seconds.</summary>
         public static void Box(
             Vector3 center,
             Vector3 halfExtents,
@@ -173,6 +176,7 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        /// <summary>Draws a wire capsule in the Scene view for a number of seconds.</summary>
         public static void Capsule(
             Vector3 start,
             Vector3 end,

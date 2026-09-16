@@ -74,6 +74,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 : inputActionAsset.FindAction(actionName, false);
         }
 
+        /// <summary>
+        /// Whether every entry names an action the asset still has, and an
+        /// ability or nothing.
+        /// </summary>
         public bool TryValidate(out string error)
         {
             if (inputActionAsset == null)

@@ -38,6 +38,10 @@ namespace Fofuxo.GameplayAbilitySystem
 
         public override Vector3 Position => Body != null ? Body.position : transform.position;
 
+        /// <summary>
+        /// Moves the Rigidbody and reports the displacement it actually
+        /// achieved.
+        /// </summary>
         public override Vector3 Move(Vector3 delta, AbilityMovementCollision collision)
         {
             if (Body == null || delta.sqrMagnitude <= Mathf.Epsilon)

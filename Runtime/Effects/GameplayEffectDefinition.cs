@@ -108,6 +108,10 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<GameplayTag> GrantedImmunityTags => grantedImmunityTags;
         public IReadOnlyList<GameplayTag> RemoveEffectsWithTags => removeEffectsWithTags;
 
+        /// <summary>
+        /// Whether this effect carries any of those effect tags. Removal and
+        /// immunity ask it; neither names an asset.
+        /// </summary>
         public bool HasAnyEffectTag(IReadOnlyList<GameplayTag> tags)
         {
             if (tags == null)

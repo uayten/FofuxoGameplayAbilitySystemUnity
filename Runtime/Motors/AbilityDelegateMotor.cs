@@ -33,6 +33,10 @@ namespace Fofuxo.GameplayAbilitySystem
         public override Vector3 Position =>
             PositionSource != null ? PositionSource.Invoke() : transform.position;
 
+        /// <summary>
+        /// Hands the displacement to the supplied delegate and reports what it
+        /// moved.
+        /// </summary>
         public override Vector3 Move(Vector3 delta, AbilityMovementCollision collision)
         {
             if (MoveHandler == null || delta.sqrMagnitude <= Mathf.Epsilon)

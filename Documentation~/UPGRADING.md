@@ -36,6 +36,10 @@ Inside that namespace the identifier `Editor` names the namespace itself, so an
 Inspector of your own that derives from Unity's base class spells it
 `UnityEditor.Editor`.
 
+**`TargetQueries.OverlapReceivers` is now `OverlapColliders`.** Same
+parameters, same return: it fills a buffer with overlapping colliders. The
+old name came from `IAbilityDamageReceiver`, which no longer exists.
+
 **Minimum editor is `6000.6`.** Older Unity 6 versions are no longer supported;
 `package.json`, the README and the repository instructions all say so now.
 

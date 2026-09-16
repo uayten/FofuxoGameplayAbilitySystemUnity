@@ -107,6 +107,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 or GameplayEffectApplicationOutcome.Stacked
                 or GameplayEffectApplicationOutcome.Overflowed;
 
+        /// <summary>
+        /// A result that did not apply, carrying the outcome that explains
+        /// why.
+        /// </summary>
         public static GameplayEffectApplicationResult Failed(
             GameplayEffectApplicationOutcome outcome) => new(outcome);
     }
