@@ -78,12 +78,21 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         private AbilityInstance activeInstance =>
             activeInstances.Count > 0 ? activeInstances[0] : null;
-
+        /// <summary>
+        /// The ability of the primary activation - the oldest one still
+        /// running - or null.
+        /// </summary>
         public AbilityDefinition ActiveAbility => activeInstance?.Definition;
+        /// <summary>
+        /// The step that activation is on, or null for an ability with no
+        /// timeline.
+        /// </summary>
         public AbilityStep ActiveStep => activeInstance?.Step;
+        /// <summary>Zero-based index of that step.</summary>
         public int ActiveStepIndex => activeInstance?.StepIndex ?? 0;
         /// <summary>True while an input would carry the activation into its next step.</summary>
         public bool IsComboWindowOpen => activeInstance?.IsComboWindowOpen ?? false;
+        /// <summary>One-based timeline frame the primary activation has reached.</summary>
         public int ActiveFrame => activeInstance?.CurrentFrame ?? 0;
 
         /// <summary>
@@ -91,6 +100,10 @@ namespace Fofuxo.GameplayAbilitySystem
         /// opted into a group policy that lets abilities coexist.
         /// </summary>
         public IReadOnlyList<AbilityInstance> ActiveInstances => activeInstances;
+        /// <summary>
+        /// How many activations are running. More than one only where an
+        /// exclusion group allowed it.
+        /// </summary>
         public int ActiveAbilityCount => activeInstances.Count;
 
         /// <summary>
@@ -175,13 +188,19 @@ namespace Fofuxo.GameplayAbilitySystem
                 return tags;
             }
         }
+        /// <summary>
+        /// Startup, Active or Recovery of the primary activation; null when
+        /// nothing runs.
+        /// </summary>
         public AbilityPhase? ActivePhase => activeInstance?.CurrentPhase;
+        /// <summary>The context the primary activation started with.</summary>
         public AbilityContext? ActiveContext => activeInstance?.Context;
         /// <summary>
         /// What the running activation's targeting acquired. Null when nothing
         /// is active; empty when the ability has no targeting at all.
         /// </summary>
         public AbilityTargetData ActiveTargetData => activeInstance?.TargetData;
+        /// <summary>True while the primary activation is moving its owner.</summary>
         public bool HasActiveDisplacement => activeInstance?.HasActiveDisplacement ?? false;
 
         /// <summary>
@@ -284,12 +303,20 @@ namespace Fofuxo.GameplayAbilitySystem
                 return false;
             }
         }
+        /// <summary>True while any activation is running.</summary>
         public bool IsActive => activeInstances.Count > 0;
+        /// <summary>
+        /// The abilities this actor is granted, in the order events are
+        /// offered to them.
+        /// </summary>
         public AbilityLoadout Loadout => loadout;
-
+        /// <summary>An activation began.</summary>
         public event Action<AbilityDefinition> AbilityStarted;
+        /// <summary>A running activation entered a new phase.</summary>
         public event Action<AbilityDefinition, AbilityPhase> AbilityPhaseChanged;
+        /// <summary>An activation finished on its own terms.</summary>
         public event Action<AbilityDefinition> AbilityCompleted;
+        /// <summary>An activation was ended by something else; the tag says what.</summary>
         public event Action<AbilityDefinition, GameplayTag> AbilityCancelled;
         /// <summary>Fires when a combo carries on into its next step.</summary>
         public event Action<AbilityDefinition, int> AbilityStepAdvanced;
@@ -318,7 +345,11 @@ namespace Fofuxo.GameplayAbilitySystem
         /// same tag also comes from an ability-wide grant or a loose tag.
         /// </summary>
         public event Action<GameplayTag, bool> StepTagWindowChanged;
-
+        /// <summary>
+        /// Optional destination for activations, cues and endings, for a
+        /// netcode layer to hang on. Null by default; nothing in the package
+        /// needs it.
+        /// </summary>
         public IAbilityReplicationSink ReplicationSink { get; set; }
 
         /// <summary>
@@ -558,7 +589,11 @@ namespace Fofuxo.GameplayAbilitySystem
             rejectionReason = result.Message;
             return result.IsAccepted;
         }
-
+        /// <summary>
+        /// Starts an ability with a context the caller built. False when the
+        /// activation rules refused it - ask EvaluateActivation for the typed
+        /// reason.
+        /// </summary>
         public bool TryActivate(AbilityDefinition ability, AbilityContext context)
         {
             return TryActivate(ability, context, out _);
@@ -826,7 +861,10 @@ namespace Fofuxo.GameplayAbilitySystem
             ForceCancelActiveAbility(CommonGameplayTags.CancelSuperseded);
             return true;
         }
-
+        /// <summary>
+        /// Completes the primary activation, but only when it is the ability
+        /// named. False when something else was running.
+        /// </summary>
         public bool TryCompleteActiveAbility(AbilityDefinition expectedAbility)
         {
             AbilityInstance instance = FindInstance(expectedAbility);
@@ -1573,7 +1611,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
             notifyBuffer.AddRange(actorTasks.Tasks);
         }
-
+        /// <summary>Whether the ability's cooldown has not elapsed yet.</summary>
         public bool IsOnCooldown(AbilityDefinition ability)
         {
             return ability != null &&
@@ -1588,13 +1626,20 @@ namespace Fofuxo.GameplayAbilitySystem
                 ? Mathf.Max(0f, endTime - Time.time)
                 : 0f;
         }
+        /// <summary>
+        /// Whether the actor holds a tag from any source: loose, granted by an
+        /// ability or an effect, or open in a step window.
+        /// </summary>
         public bool HasTag(GameplayTag tag)
         {
             return !tag.IsEmpty &&
                    (looseTags.Contains(tag) ||
                     grantedTagCounts.TryGetValue(tag, out int count) && count > 0);
         }
-
+        /// <summary>
+        /// Sets or clears a tag the game owns. Tags granted by abilities and
+        /// effects are counted separately and are untouched by this.
+        /// </summary>
         public void SetLooseTag(GameplayTag tag, bool enabled)
         {
             if (tag.IsEmpty)
@@ -1611,7 +1656,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 looseTags.Remove(tag);
             }
         }
-
+        /// <summary>
+        /// The granted ability with this id, or null. The id is the asset's
+        /// abilityId, never its file name.
+        /// </summary>
         public AbilityDefinition FindAbility(string abilityId)
         {
             return loadout != null ? loadout.FindAbility(abilityId) : null;

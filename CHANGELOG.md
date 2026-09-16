@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### The editor assembly has a namespace, and the types you call explain themselves
+
+Two of the three things the `1.0` milestone still wanted.
+
+- **Breaking: every public editor type moved into
+  `Fofuxo.GameplayAbilitySystem.Editor`.** They were in the global namespace,
+  which every consumer project inherited - `AbilitySystemDebuggerWindow`,
+  `AbilityTimeControls`, `AssetNamingConvention`, the drawers and the custom
+  Inspectors. The asmdef already declared that root namespace; the files did
+  not follow it. A project that referenced one of those types adds a `using`;
+  nothing in BossRush did, so nothing there changed. Inside the new namespace
+  `Editor` now names a namespace, so the Inspectors derive from
+  `UnityEditor.Editor` spelled out.
+- **Documented the members of the types a consumer calls in code**: 58 of them
+  across `AbilitySystem`, `AttributeSet`, `GameplayEffectContainer`,
+  `AbilityInstance` and `GameplayCueDispatcher`. The remaining ~360 public
+  members are almost all serialized authoring fields, which the Inspector
+  already explains with a `Tooltip` and the field tables document; they are
+  left rather than duplicated a third time.
+
 ### A sample that runs the whole loop, and the promises around it (Milestone 1)
 
 The package had no sample, no allocation budget anyone could check, no upgrade

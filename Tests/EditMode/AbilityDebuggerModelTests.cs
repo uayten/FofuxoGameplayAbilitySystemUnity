@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using Fofuxo.GameplayAbilitySystem.Editor;
 
 namespace Fofuxo.GameplayAbilitySystem.Tests
 {

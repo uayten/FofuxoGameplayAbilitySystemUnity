@@ -51,7 +51,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
         /// <summary>Every effect live on this actor, oldest first.</summary>
         public IReadOnlyList<ActiveGameplayEffect> ActiveEffects => activeEffects;
-
+        /// <summary>How many effects are live on this actor.</summary>
         public int ActiveEffectCount => activeEffects.Count;
 
         public AttributeSet Attributes
@@ -285,7 +285,7 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             return TryGetActiveEffect(handle, out _);
         }
-
+        /// <summary>Looks a live effect up by its handle. False once it has ended.</summary>
         public bool TryGetActiveEffect(
             GameplayEffectHandle handle, out ActiveGameplayEffect effect)
         {
@@ -431,7 +431,10 @@ namespace Fofuxo.GameplayAbilitySystem
 
             return RemoveBuffered();
         }
-
+        /// <summary>
+        /// Removes every active effect and returns how many went. Teardown
+        /// uses it, and so does a load that replaces the actor's state.
+        /// </summary>
         public int RemoveAllEffects()
         {
             removalBuffer.Clear();

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
+using Fofuxo.GameplayAbilitySystem.Editor;
 
 namespace Fofuxo.GameplayAbilitySystem.Tests
 {
@@ -63,7 +64,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             yield return typeof(AbilitySystem).Assembly;
             yield return typeof(AbilityInputRouter).Assembly;
             yield return typeof(AbilityRigidbodyMotor).Assembly;
-            yield return typeof(global::AbilitySystemDebuggerWindow).Assembly;
+            yield return typeof(Editor.AbilitySystemDebuggerWindow).Assembly;
         }
     }
 }

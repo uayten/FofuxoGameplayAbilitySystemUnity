@@ -46,8 +46,12 @@ namespace Fofuxo.GameplayAbilitySystem
             StepIndex = 0;
             ResetStepState();
         }
-
+        /// <summary>The ability this activation is running.</summary>
         public AbilityDefinition Definition { get; }
+        /// <summary>
+        /// Who acted, on what and in which direction, as the activation
+        /// started.
+        /// </summary>
         public AbilityContext Context { get; private set; }
 
         /// <summary>
@@ -63,17 +67,22 @@ namespace Fofuxo.GameplayAbilitySystem
         /// very spec that landed. Null for every other start.
         /// </summary>
         public GameplayEffectSpec TriggeringSpec { get; }
+        /// <summary>Zero-based index of the step being run.</summary>
         public int StepIndex { get; private set; }
         /// <summary>
         /// The timeline this activation runs, or null for an ability that has
         /// none. Null is the normal shape for an ability whose work is code.
         /// </summary>
         public TimelineAbilityDefinition Timeline { get; }
-
+        /// <summary>The step itself, or null for an ability with no timeline.</summary>
         public AbilityStep Step => Timeline == null ? null : Timeline.StepAt(StepIndex);
+        /// <summary>Seconds since the current step started.</summary>
         public float ElapsedTime { get; private set; }
+        /// <summary>One-based frame the current step has reached.</summary>
         public int CurrentFrame { get; private set; }
+        /// <summary>Startup, Active or Recovery of this activation.</summary>
         public AbilityPhase CurrentPhase { get; private set; }
+        /// <summary>How many hits this activation has registered across its steps.</summary>
         public int RegisteredHitCount => registeredHits.Count;
 
         /// <summary>
@@ -82,7 +91,7 @@ namespace Fofuxo.GameplayAbilitySystem
         /// the step started, not a live view of the world.
         /// </summary>
         public AbilityTargetData TargetData => acquiredTargets;
-
+        /// <summary>Whether another step follows the current one.</summary>
         public bool HasNextStep =>
             Timeline != null && StepIndex + 1 < Timeline.StepCount;
 
@@ -160,9 +169,16 @@ namespace Fofuxo.GameplayAbilitySystem
         /// displacement into the next one.
         /// </summary>
         public AbilityMoveTask DisplacementTask => displacementTask;
-
+        /// <summary>
+        /// True while this activation's displacement task is still moving the
+        /// owner.
+        /// </summary>
         public bool HasActiveDisplacement =>
             displacementTask != null && displacementTask.IsRunning;
+        /// <summary>
+        /// True while the authored displacement window of the current step is
+        /// open.
+        /// </summary>
         public bool IsDisplacementWindowOpen =>
             displacementTask != null && displacementTask.IsWindowOpen;
 

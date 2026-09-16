@@ -21,10 +21,16 @@ namespace Fofuxo.GameplayAbilitySystem
             NewValue = newValue;
             Source = source;
         }
-
+        /// <summary>The attribute that changed.</summary>
         public GameplayAttribute Attribute { get; }
+        /// <summary>Its aggregate value before the change.</summary>
         public float OldValue { get; }
+        /// <summary>Its aggregate value after it.</summary>
         public float NewValue { get; }
+        /// <summary>
+        /// Whatever caused the change - the attacker, the effect's source, or
+        /// null.
+        /// </summary>
         public UnityEngine.Object Source { get; }
     }
 
@@ -64,10 +70,13 @@ namespace Fofuxo.GameplayAbilitySystem
                 this.minValue = minValue;
                 this.maxValue = maxValue;
             }
-
+            /// <summary>Which attribute this row sets up.</summary>
             public GameplayAttribute Attribute => attribute;
+            /// <summary>The value the actor starts with.</summary>
             public float BaseValue => baseValue;
+            /// <summary>Lowest value the attribute is clamped to.</summary>
             public float MinValue => minValue;
+            /// <summary>Highest value the attribute is clamped to.</summary>
             public float MaxValue => maxValue;
         }
         /// <summary>
@@ -84,8 +93,9 @@ namespace Fofuxo.GameplayAbilitySystem
                 this.attribute = attribute;
                 this.perSecond = perSecond;
             }
-
+            /// <summary>Which attribute refills by itself.</summary>
             public GameplayAttribute Attribute => attribute;
+            /// <summary>Units added per second.</summary>
             public float PerSecond => perSecond;
         }
 
@@ -99,7 +109,10 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly Dictionary<int, GameplayAttribute> slotOwners = new();
         private int nextSlot;
         private bool initialized;
-
+        /// <summary>
+        /// Raised whenever an attribute's aggregate value moves, with the old
+        /// value, the new one and the source.
+        /// </summary>
         public event Action<AttributeValueChanged> Changed;
 
         protected virtual void Awake()
@@ -146,12 +159,12 @@ namespace Fofuxo.GameplayAbilitySystem
                         Mathf.Max(initial.MinValue, initial.MaxValue)));
             }
         }
-
+        /// <summary>The aggregate value: the base plus every live modifier.</summary>
         public float GetCurrent(GameplayAttribute attribute)
         {
             return GetOrCreate(attribute).CurrentValue;
         }
-
+        /// <summary>The base value alone, with no modifier applied.</summary>
         public float GetBase(GameplayAttribute attribute)
         {
             return GetOrCreate(attribute).BaseValue;
@@ -203,7 +216,10 @@ namespace Fofuxo.GameplayAbilitySystem
                     modifier.Attribute, oldValue, newValue, modifier.Source));
             }
         }
-
+        /// <summary>
+        /// Replaces the authored starting values and rebuilds the set, which
+        /// clears the runtime values and every modifier slot with them.
+        /// </summary>
         public void SetInitialValues(InitialValue[] initials)
         {
             initialValues = initials ?? Array.Empty<InitialValue>();

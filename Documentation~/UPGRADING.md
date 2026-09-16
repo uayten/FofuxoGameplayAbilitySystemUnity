@@ -22,6 +22,20 @@ with one minor version of warning.
 
 ## Unreleased
 
+**The editor assembly moved into `Fofuxo.GameplayAbilitySystem.Editor`.** Its
+public types used to sit in the global namespace. If your project referenced one
+- a custom Inspector deriving from `GameplayEffectDefinitionEditor`, a tool
+calling `AssetNamingConvention`, an editor script opening the debugger window -
+add the using:
+
+```csharp
+using Fofuxo.GameplayAbilitySystem.Editor;
+```
+
+Inside that namespace the identifier `Editor` names the namespace itself, so an
+Inspector of your own that derives from Unity's base class spells it
+`UnityEditor.Editor`.
+
 **Minimum editor is `6000.6`.** Older Unity 6 versions are no longer supported;
 `package.json`, the README and the repository instructions all say so now.
 

@@ -21,17 +21,17 @@ namespace Fofuxo.GameplayAbilitySystem
             EffectHandle = effectHandle;
             AddedTime = Time.time;
         }
-
+        /// <summary>Names this cue for as long as it lives.</summary>
         public GameplayCueHandle Handle { get; }
 
         /// <summary>The parameters as of the last Add or WhileActive.</summary>
         public GameplayCueParameters Parameters { get; internal set; }
-
+        /// <summary>The tag being presented.</summary>
         public GameplayTag Cue => Parameters.Cue;
 
         /// <summary>The active effect this cue belongs to, or None for a cue added by code.</summary>
         public GameplayEffectHandle EffectHandle { get; }
-
+        /// <summary>Time.time when the cue was added.</summary>
         public float AddedTime { get; }
 
         public override string ToString()
@@ -83,7 +83,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
         /// <summary>Every persistent cue live on the actor, oldest first.</summary>
         public IReadOnlyList<ActiveGameplayCue> ActiveCues => active;
-
+        /// <summary>How many presenters are registered on this actor.</summary>
         public int PresenterCount => presenters.Count;
 
         /// <summary>
@@ -118,12 +118,15 @@ namespace Fofuxo.GameplayAbilitySystem
                 Present(presenter, in live);
             }
         }
-
+        /// <summary>Unregisters a presenter. False when it was not registered.</summary>
         public bool RemovePresenter(IGameplayCuePresenter presenter)
         {
             return presenter != null && presenters.Remove(presenter);
         }
-
+        /// <summary>
+        /// Registers a filter, which runs before the presenters and may
+        /// rewrite or suppress a cue.
+        /// </summary>
         public void AddFilter(IGameplayCueFilter filter)
         {
             if (filter != null && !filters.Contains(filter))
@@ -131,7 +134,7 @@ namespace Fofuxo.GameplayAbilitySystem
                 filters.Add(filter);
             }
         }
-
+        /// <summary>Unregisters a filter. False when it was not registered.</summary>
         public bool RemoveFilter(IGameplayCueFilter filter)
         {
             return filter != null && filters.Remove(filter);
@@ -258,12 +261,12 @@ namespace Fofuxo.GameplayAbilitySystem
 
             return removed;
         }
-
+        /// <summary>Whether a persistent cue is still live.</summary>
         public bool IsActive(GameplayCueHandle handle)
         {
             return Find(handle) != null;
         }
-
+        /// <summary>Looks a live persistent cue up by its handle.</summary>
         public bool TryGetActive(GameplayCueHandle handle, out ActiveGameplayCue cue)
         {
             cue = Find(handle);

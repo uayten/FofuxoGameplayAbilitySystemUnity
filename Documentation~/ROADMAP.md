@@ -191,13 +191,12 @@ and `CHANGELOG.md` describe them. What is left is what actually declares `1.0`.
 
 Deliverables:
 
-- **Per-member API documentation.** Every public *type* is documented and a test
-  keeps it that way; roughly four hundred public members - properties, methods
-  and events - still are not. The same test extends to members once they are
-  written.
-- **A namespace for the editor assembly.** Its public types sit in the global
-  namespace today, which a consumer project inherits. Moving them is a break,
-  so it belongs before `1.0` and not after.
+- **The public API documentation that is still missing.** Every public type is
+  documented and a test keeps it that way, and the members of the five types a
+  consumer calls in code are documented too. What is left is ~360 members that
+  are almost all serialized authoring fields: the Inspector explains them with a
+  `Tooltip` and the field tables list them, so the decision before `1.0` is
+  whether a third copy in XML earns its keep - not to write it by default.
 - **The version itself**: `package.json` to `1.0.0`, the changelog heading
   dated, the tag, and the README's "no compatibility promise" section replaced
   by the policy in `Documentation~/RELEASE_CHECKLIST.md`.
