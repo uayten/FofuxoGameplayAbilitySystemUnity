@@ -29,7 +29,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void SetDefinition_Rebuilds_AndDropsActiveDurationEntries()
+        public void SetDefinition_Rebuilds_AndDropsAttachedModifiers()
         {
             AttributeSetDefinition definition = NewDefinition(
                 new[] { new AttributeSet.InitialValue(Health, 100f, 0f, 200f) },
@@ -42,14 +42,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 {
                     new AttributeSet.InitialValue(Health, 100f, 0f, 200f),
                 });
-                Assert.IsTrue(set.ApplyDurationModifier(
-                    new AttributeModifier(Health, AttributeOperation.Add, 50f),
-                    10f,
-                    EffectStacking.Stack));
+                int slot = set.AddModifier(
+                    new AttributeModifier(Health, AttributeOperation.Add, 50f));
                 Assert.AreEqual(150f, set.GetCurrent(Health));
 
                 set.SetDefinition(definition);
                 Assert.AreEqual(100f, set.GetCurrent(Health));
+                Assert.IsFalse(set.RemoveModifier(slot), "The rebuild dropped the slot.");
                 set.Tick(20f);
                 Assert.AreEqual(100f, set.GetCurrent(Health));
             }

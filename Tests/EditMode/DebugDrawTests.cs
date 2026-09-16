@@ -75,17 +75,15 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         {
             GameObject owner = NewOwner();
             DebugDrawEffectDefinition effect = NewEffect();
-            SetEffect(effect, "shape", 0);
-            SetEffect(effect, "radius", 5f);
-            SetEffect(effect, "duration", 1f);
+            effect.ConfigureDrawForTests(HitShape.Sphere(Vector3.zero, 5f), Color.yellow, 1f);
 
             Physics.SyncTransforms();
             AbilitySystem system = owner.GetComponent<AbilitySystem>();
-            AbilityDefinition definition = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition definition = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             owned.Add(definition);
             AbilityContext context = AbilityContext.FromTarget(owner, null);
             AbilityInstance instance = new(definition, context);
-            effect.Apply(new AbilityEffectContext(system, instance, 0));
+            effect.ApplyFrom(new GameplayEffectContext(system, instance, 0));
 
             Assert.AreEqual(0, instance.RegisteredHitCount);
         }
@@ -106,17 +104,36 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             }
         }
 
+        /// <summary>
+        /// The debug effect used to declare its own shape enum, centre, extents
+        /// and radius. Copying a query's shape into it is what makes the drawing
+        /// trustworthy, so the field has to be the same type the query uses.
+        /// </summary>
+        [Test]
+        public void DebugDrawEffect_ReadsTheSameShapeTypeAsQueries()
+        {
+            DebugDrawEffectDefinition effect = NewEffect();
+            HitShape authored = HitShape.Cone(1 << 3, 6f, 40f, 2f);
+            effect.ConfigureDrawForTests(authored, Color.yellow, 1f);
+
+            Assert.AreEqual(HitShapeKind.Cone, effect.Targeting.Shape.Kind);
+            Assert.AreEqual(6f, effect.Targeting.Shape.Radius, 1e-4f);
+            Assert.AreEqual(40f, effect.Targeting.Shape.ConeHalfAngle, 1e-4f);
+            Assert.AreEqual(2f, effect.Targeting.Shape.ConeInnerRadius, 1e-4f);
+            Assert.IsTrue(authored.Equals(effect.Targeting.Shape));
+        }
+
         [Test]
         public void DebugDrawEffect_NullOwnerDoesNotThrow()
         {
             DebugDrawEffectDefinition effect = NewEffect();
-            AbilityDefinition definition = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition definition = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             owned.Add(definition);
             AbilityContext context = AbilityContext.FromTarget(null, null);
             AbilityInstance instance = new(definition, context);
 
-            Assert.DoesNotThrow(() => effect.Apply(
-                new AbilityEffectContext(null, instance, 0)));
+            Assert.DoesNotThrow(() => effect.ApplyFrom(
+                new GameplayEffectContext(null, instance, 0)));
         }
 
         private GameObject NewOwner()
@@ -135,20 +152,5 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             return effect;
         }
 
-        private static void SetEffect<TValue>(
-            DebugDrawEffectDefinition effect, string fieldName, TValue value)
-        {
-            var field = typeof(DebugDrawEffectDefinition).GetField(
-                fieldName,
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.IsNotNull(field, fieldName);
-            object boxedValue = value;
-            if (field.FieldType.IsEnum)
-            {
-                boxedValue = System.Enum.ToObject(field.FieldType, value);
-            }
-
-            field.SetValue(effect, boxedValue);
-        }
     }
 }

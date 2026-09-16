@@ -3,7 +3,12 @@
     "rootNamespace": "Fofuxo.GameplayAbilitySystem.Tests",
     "references": [
         "Uayten.FofuxoGameplayAbilitySystem",
-        "Uayten.FofuxoGameplayAbilitySystem.Input"
+        "Uayten.FofuxoGameplayAbilitySystem.Editor",
+        "Uayten.FofuxoGameplayAbilitySystem.Input",
+        "Unity.InputSystem",
+        "Uayten.FofuxoGameplayAbilitySystem.Motors",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
     ],
     "includePlatforms": [
         "Editor"

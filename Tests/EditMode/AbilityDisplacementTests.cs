@@ -17,12 +17,12 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void FreshAbility_HasNoDisplacement_AndValidates()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 ability.SetAbilityIdForTests("test.none");
-                Assert.IsFalse(ability.HasDisplacement);
-                Assert.AreEqual(0f, ability.DisplacementDurationSeconds);
+                Assert.IsFalse(ability.FirstStepForTests.HasDisplacement);
+                Assert.AreEqual(0f, ability.FirstStepForTests.DisplacementDurationSeconds);
                 Assert.IsTrue(ability.TryValidate(out string error), error);
             }
             finally
@@ -34,17 +34,17 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void ConfiguredWindow_ResolvesDurationFromFallbackRate()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 ability.SetAbilityIdForTests("test.dash");
-                ability.ConfigureDisplacementForTests(
+                ability.FirstStepForTests.ConfigureDisplacementForTests(
                     AbilityDisplacementDirection.Context,
                     15f,
                     1,
                     55);
-                Assert.IsTrue(ability.HasDisplacement);
-                Assert.AreEqual(54f / 60f, ability.DisplacementDurationSeconds, Tolerance);
+                Assert.IsTrue(ability.FirstStepForTests.HasDisplacement);
+                Assert.AreEqual(54f / 60f, ability.FirstStepForTests.DisplacementDurationSeconds, Tolerance);
                 Assert.IsTrue(ability.TryValidate(out string error), error);
             }
             finally
@@ -56,11 +56,11 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void CollapsedWindow_FailsValidation()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 ability.SetAbilityIdForTests("test.bad-window");
-                ability.ConfigureDisplacementForTests(
+                ability.FirstStepForTests.ConfigureDisplacementForTests(
                     AbilityDisplacementDirection.Context,
                     5f,
                     10,
@@ -77,15 +77,15 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void WindowOutsideTimeline_FailsValidation()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 ability.SetAbilityIdForTests("test.bad-window");
-                ability.ConfigureDisplacementForTests(
+                ability.FirstStepForTests.ConfigureDisplacementForTests(
                     AbilityDisplacementDirection.Context,
                     5f,
                     1,
-                    ability.RecoveryEndFrame + 1);
+                    ability.FirstStepForTests.RecoveryEndFrame + 1);
                 Assert.IsFalse(ability.TryValidate(out string error));
                 Assert.IsFalse(string.IsNullOrWhiteSpace(error));
             }
@@ -186,13 +186,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void TickDisplacement_TravelsConfiguredDistance_AtConstantSpeed()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             GameObject owner = new("DisplacementOwner");
             try
             {
                 AbilityContext context = AbilityContext.FromDirection(owner, null, Vector3.right);
                 AbilityInstance instance = new(ability, context);
-                instance.BeginDisplacement(Vector3.right, null, 15f, 0.9f);
+                instance.BeginDisplacement(Vector3.right, 15f, 0.9f);
 
                 Assert.IsTrue(instance.HasActiveDisplacement);
                 bool moved = instance.TickDisplacement(0.45f, out Vector3 firstStep);
@@ -219,13 +219,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void TickDisplacement_ZeroDeltaTime_MovesNothing()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             GameObject owner = new("DisplacementOwner");
             try
             {
                 AbilityContext context = AbilityContext.FromDirection(owner, null, Vector3.right);
                 AbilityInstance instance = new(ability, context);
-                instance.BeginDisplacement(Vector3.right, null, 5f, 0.5f);
+                instance.BeginDisplacement(Vector3.right, 5f, 0.5f);
 
                 Assert.IsFalse(instance.TickDisplacement(0f, out Vector3 step));
                 Assert.AreEqual(Vector3.zero, step);

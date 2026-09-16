@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43518e93589375d4db06ca752f1384c6, type: 3}
+  m_Name: GAL_Sample_Enemy
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.AbilityLoadout
+  abilities:
+  - {fileID: 11400000, guid: f16dc185ae653a34b8b2348d68c069ce, type: 2}
+  - {fileID: 11400000, guid: 0e684dc915b3d64449df12113aafd45c, type: 2}
+  - {fileID: 11400000, guid: 6c99de84832225c4fa3c10f399699502, type: 2}
+  - {fileID: 11400000, guid: 8f69c1cf8293b234fb85703326f3c07f, type: 2}

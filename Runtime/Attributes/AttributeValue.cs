@@ -6,8 +6,12 @@ namespace Fofuxo.GameplayAbilitySystem
 {
     /// <summary>
     /// Per-actor runtime value for one attribute. Base value, limits, and the
-    /// listed duration modifiers aggregate deterministically into
+    /// attached modifiers aggregate deterministically into
     /// <see cref="CurrentValue"/>.
+    ///
+    /// Every attached modifier carries a slot id. Two identical modifiers from
+    /// the same source are two slots, so detaching one never detaches the other
+    /// by accident — which is what removal by value could not promise.
     /// </summary>
     [Serializable]
     public sealed class AttributeValue
@@ -16,7 +20,7 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private float minValue;
         [SerializeField] private float maxValue = float.PositiveInfinity;
 
-        private readonly List<AttributeModifier> modifiers = new();
+        private readonly List<ModifierSlot> modifiers = new();
 
         public AttributeValue()
         {
@@ -32,7 +36,9 @@ namespace Fofuxo.GameplayAbilitySystem
         public float BaseValue => baseValue;
         public float MinValue => minValue;
         public float MaxValue => maxValue;
-        public IReadOnlyList<AttributeModifier> Modifiers => modifiers;
+        public int ModifierCount => modifiers.Count;
+
+        public AttributeModifier GetModifier(int index) => modifiers[index].Modifier;
 
         public float CurrentValue
         {
@@ -45,7 +51,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
                 for (int i = 0; i < modifiers.Count; i++)
                 {
-                    AttributeModifier modifier = modifiers[i];
+                    AttributeModifier modifier = modifiers[i].Modifier;
                     switch (modifier.Operation)
                     {
                         case AttributeOperation.Add:
@@ -83,14 +89,85 @@ namespace Fofuxo.GameplayAbilitySystem
             SetBase(baseValue);
         }
 
-        public void AddModifier(AttributeModifier modifier)
+        /// <summary>Attaches a modifier under a slot id the caller owns.</summary>
+        internal void AddModifier(int slot, AttributeModifier modifier)
         {
-            modifiers.Add(modifier);
+            modifiers.Add(new ModifierSlot(slot, modifier));
         }
 
-        public bool RemoveModifier(AttributeModifier modifier)
+        /// <summary>
+        /// Attaches a modifier and issues its slot id. The overload tests and
+        /// direct callers use; the effect layer supplies its own ids.
+        /// </summary>
+        public int AddModifier(AttributeModifier modifier)
         {
-            return modifiers.Remove(modifier);
+            int slot = NextLocalSlot();
+            modifiers.Add(new ModifierSlot(slot, modifier));
+            return slot;
+        }
+
+        /// <summary>Replaces the modifier in a slot, for a live magnitude that moved.</summary>
+        internal bool UpdateModifier(int slot, AttributeModifier modifier)
+        {
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                if (modifiers[i].Id == slot)
+                {
+                    modifiers[i] = new ModifierSlot(slot, modifier);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool RemoveModifier(int slot)
+        {
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                if (modifiers[i].Id == slot)
+                {
+                    modifiers.RemoveAt(i);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        internal void ClearModifiers()
+        {
+            modifiers.Clear();
+        }
+
+        /// <summary>
+        /// Slot ids for modifiers attached without the effect layer. Negative so
+        /// they can never collide with the positive ids the set issues.
+        /// </summary>
+        private int NextLocalSlot()
+        {
+            int slot = -1;
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                if (modifiers[i].Id <= slot)
+                {
+                    slot = modifiers[i].Id - 1;
+                }
+            }
+
+            return slot;
+        }
+
+        private readonly struct ModifierSlot
+        {
+            public ModifierSlot(int id, AttributeModifier modifier)
+            {
+                Id = id;
+                Modifier = modifier;
+            }
+
+            public int Id { get; }
+            public AttributeModifier Modifier { get; }
         }
     }
 }

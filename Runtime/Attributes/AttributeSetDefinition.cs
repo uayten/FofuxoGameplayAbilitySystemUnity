@@ -8,7 +8,7 @@ namespace Fofuxo.GameplayAbilitySystem
     /// Assign on <see cref="AttributeSet"/> to stop authoring numbers per instance.
     /// </summary>
     [CreateAssetMenu(
-        fileName = "AttributeSetDefinition",
+        fileName = "ABS_NewAttributeSet",
         menuName = "Fofuxo/Abilities/Attribute Set")]
     public sealed class AttributeSetDefinition : ScriptableObject
     {

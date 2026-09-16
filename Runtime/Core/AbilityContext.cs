@@ -2,6 +2,10 @@ using UnityEngine;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
+    /// <summary>
+    /// Who is acting, on what, and in which direction. The per-activation
+    /// input every ability, effect and cue is resolved against.
+    /// </summary>
     public readonly struct AbilityContext
     {
         public AbilityContext(

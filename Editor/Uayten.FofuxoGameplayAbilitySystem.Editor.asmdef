@@ -2,7 +2,9 @@
     "name": "Uayten.FofuxoGameplayAbilitySystem.Editor",
     "rootNamespace": "Fofuxo.GameplayAbilitySystem.Editor",
     "references": [
-        "Uayten.FofuxoGameplayAbilitySystem"
+        "Uayten.FofuxoGameplayAbilitySystem",
+        "Uayten.FofuxoGameplayAbilitySystem.Input",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [
         "Editor"

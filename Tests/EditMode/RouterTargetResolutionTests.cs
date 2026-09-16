@@ -48,10 +48,10 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void TargetlessAbility_IgnoresFallbackTarget()
         {
-            AbilityDefinition nova = NewAbility("test.nova", requiresTarget: false);
+            TimelineAbilityDefinition nova = NewAbility("test.nova", requiresTarget: false);
             Grant(nova);
 
-            InvokeBinding(nova, null);
+            InvokeBinding(nova);
 
             // A fallback target 10m away with range 3 would refuse activation
             // if it were resolved; targetless abilities skip resolution.
@@ -61,17 +61,17 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void TargetedAbility_StillValidatesAgainstFallbackTarget()
         {
-            AbilityDefinition strike = NewAbility("test.strike", requiresTarget: true);
+            TimelineAbilityDefinition strike = NewAbility("test.strike", requiresTarget: true);
             Grant(strike);
 
-            InvokeBinding(strike, null);
+            InvokeBinding(strike);
 
             Assert.IsNull(system.ActiveAbility);
         }
 
-        private AbilityDefinition NewAbility(string id, bool requiresTarget)
+        private TimelineAbilityDefinition NewAbility(string id, bool requiresTarget)
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             owned.Add(ability);
             SetField(ability, "abilityId", id);
             SetField(ability, "requiresTarget", requiresTarget);
@@ -87,22 +87,35 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             SetField(system, "loadout", loadout);
         }
 
-        private void InvokeBinding(AbilityDefinition ability, AbilitySequenceDefinition sequence)
+        private void InvokeBinding(TimelineAbilityDefinition ability)
         {
             MethodInfo method = typeof(AbilityInputRouter).GetMethod(
                 "TryActivateBinding",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(method);
-            method.Invoke(router, new object[] { ability, sequence });
+            method.Invoke(router, new object[] { ability });
         }
 
         private static void SetField<TValue>(object target, string fieldName, TValue value)
         {
-            var field = target.GetType().GetField(
-                fieldName,
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.IsNotNull(field, fieldName);
-            field.SetValue(target, value);
+            // Walks up the hierarchy: a private field of a base class is
+            // invisible to a single GetField call, and an ability's own fields
+            // sit one level above the timeline type most fixtures use.
+            for (System.Type type = target.GetType(); type != null; type = type.BaseType)
+            {
+                System.Reflection.FieldInfo field = type.GetField(
+                    fieldName,
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.DeclaredOnly);
+                if (field != null)
+                {
+                    field.SetValue(target, value);
+                    return;
+                }
+            }
+
+            Assert.Fail($"No field named {fieldName}.");
         }
     }
 }

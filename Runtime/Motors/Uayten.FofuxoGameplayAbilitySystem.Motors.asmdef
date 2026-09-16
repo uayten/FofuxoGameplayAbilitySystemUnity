@@ -1,0 +1,16 @@
+{
+    "name": "Uayten.FofuxoGameplayAbilitySystem.Motors",
+    "rootNamespace": "Fofuxo.GameplayAbilitySystem",
+    "references": [
+        "Uayten.FofuxoGameplayAbilitySystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

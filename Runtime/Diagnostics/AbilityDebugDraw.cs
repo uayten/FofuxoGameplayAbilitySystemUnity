@@ -21,6 +21,117 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public static bool Enabled { get; set; } = true;
 
+        /// <summary>
+        /// Draws a <see cref="HitShape"/> exactly where it would query. Every
+        /// on-screen representation of a shape goes through here — the debug
+        /// draw effect, the runtime overlay and the editor gizmos — so what is
+        /// drawn and what is queried can never drift apart.
+        /// </summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static void Shape(
+            in HitShape shape,
+            Transform owner,
+            Vector3 aimPoint,
+            Vector3 direction,
+            Color color,
+            float duration = 1f)
+        {
+            if (owner == null)
+            {
+                return;
+            }
+
+            Vector3 center = shape.ResolveCenter(owner, aimPoint);
+            switch (shape.Kind)
+            {
+                case HitShapeKind.Box:
+                    Box(center, shape.HalfExtents, owner.rotation, color, duration);
+                    break;
+                case HitShapeKind.Capsule:
+                    Capsule(
+                        center,
+                        shape.ResolveEnd(owner, aimPoint, direction),
+                        shape.Radius,
+                        color,
+                        duration);
+                    break;
+                case HitShapeKind.Cone:
+                    Cone(
+                        center,
+                        ResolveFacing(owner, direction),
+                        shape.Radius,
+                        shape.ConeHalfAngle,
+                        shape.ConeInnerRadius,
+                        color,
+                        duration);
+                    break;
+                case HitShapeKind.Ray:
+                    Line(
+                        center,
+                        shape.ResolveEnd(owner, aimPoint, direction),
+                        color,
+                        duration);
+                    break;
+                default:
+                    Sphere(center, shape.Radius, color, duration);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// A ground-plane cone: the outer arc, its two edges, and the inner
+        /// circle that matches whatever the angle.
+        /// </summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static void Cone(
+            Vector3 center,
+            Vector3 facing,
+            float radius,
+            float halfAngle,
+            float innerRadius,
+            Color color,
+            float duration = 1f)
+        {
+            if (!Enabled || radius <= Mathf.Epsilon || duration <= 0f)
+            {
+                return;
+            }
+
+            Vector3 planar = Vector3.ProjectOnPlane(facing, Vector3.up);
+            planar = planar.sqrMagnitude > Mathf.Epsilon
+                ? planar.normalized
+                : Vector3.forward;
+            Vector3 side = Vector3.Cross(Vector3.up, planar);
+
+            Vector3 previous = center + Rotate(planar, side, -halfAngle) * radius;
+            Debug.DrawLine(center, previous, color, duration);
+            int segments = Mathf.Max(2, Mathf.CeilToInt(halfAngle * 2f / 10f));
+            for (int i = 1; i <= segments; i++)
+            {
+                float angle = Mathf.Lerp(-halfAngle, halfAngle, i / (float)segments);
+                Vector3 next = center + Rotate(planar, side, angle) * radius;
+                Debug.DrawLine(previous, next, color, duration);
+                previous = next;
+            }
+
+            Debug.DrawLine(previous, center, color, duration);
+            if (innerRadius > Mathf.Epsilon)
+            {
+                DrawCircle(center, innerRadius, planar, side, color, duration);
+            }
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        public static void Line(Vector3 start, Vector3 end, Color color, float duration = 1f)
+        {
+            if (!Enabled || duration <= 0f)
+            {
+                return;
+            }
+
+            Debug.DrawLine(start, end, color, duration);
+        }
+
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
         public static void Sphere(Vector3 center, float radius, Color color, float duration = 1f)
         {
@@ -117,6 +228,17 @@ namespace Fofuxo.GameplayAbilitySystem
                 center + rotation * new Vector3(-halfExtents.x, halfExtents.y, halfExtents.z),
                 center + rotation * new Vector3(halfExtents.x, halfExtents.y, halfExtents.z),
             };
+        }
+
+        private static Vector3 ResolveFacing(Transform owner, Vector3 direction)
+        {
+            return direction.sqrMagnitude > Mathf.Epsilon ? direction : owner.forward;
+        }
+
+        private static Vector3 Rotate(Vector3 forward, Vector3 side, float degrees)
+        {
+            float radians = degrees * Mathf.Deg2Rad;
+            return forward * Mathf.Cos(radians) + side * Mathf.Sin(radians);
         }
 
         private static void DrawCircle(

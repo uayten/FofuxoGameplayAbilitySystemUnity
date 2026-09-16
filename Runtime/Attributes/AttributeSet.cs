@@ -4,6 +4,10 @@ using UnityEngine;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
+    /// <summary>
+    /// One attribute value changing: what it was, what it became, and the
+    /// object that caused it.
+    /// </summary>
     public readonly struct AttributeValueChanged
     {
         public AttributeValueChanged(
@@ -26,19 +30,21 @@ namespace Fofuxo.GameplayAbilitySystem
 
     /// <summary>
     /// Owns per-actor runtime attribute values. Games subclass this with
-    /// concrete sets (Health, Stamina, Poise). Instant modifiers fold into the
-    /// base value; duration support arrives through the modifiers list.
+    /// concrete sets (Health, Stamina, Poise).
+    ///
+    /// The set aggregates; it does not decide lifetimes. An instant change
+    /// folds into the base value, and a modifier attached here stays attached
+    /// until its slot is removed. How long that is — duration, period, stacking,
+    /// overflow, immunity — belongs to <see cref="GameplayEffectContainer"/>,
+    /// which is the one owner of an effect lifecycle. Regeneration stays here,
+    /// because it is authored on the set itself and belongs to no application.
     /// </summary>
-    public enum EffectStacking
-    {
-        Stack,
-        Refresh,
-        Ignore
-    }
-
     [DisallowMultipleComponent]
     public class AttributeSet : MonoBehaviour
     {
+        /// <summary>
+        /// An attribute's starting value and the limits it is clamped to.
+        /// </summary>
         [Serializable]
         public struct InitialValue
         {
@@ -64,7 +70,9 @@ namespace Fofuxo.GameplayAbilitySystem
             public float MinValue => minValue;
             public float MaxValue => maxValue;
         }
-
+        /// <summary>
+        /// An attribute that refills by itself, in units per second.
+        /// </summary>
         [Serializable]
         public struct Regeneration
         {
@@ -87,13 +95,16 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private Regeneration[] regeneration = { };
 
         private readonly Dictionary<GameplayAttribute, AttributeValue> values = new();
-        private readonly List<DurationEntry> durationEntries = new();
+        /// <summary>Attribute each issued slot belongs to, so removal finds it in one lookup.</summary>
+        private readonly Dictionary<int, GameplayAttribute> slotOwners = new();
+        private int nextSlot;
+        private bool initialized;
 
         public event Action<AttributeValueChanged> Changed;
 
         protected virtual void Awake()
         {
-            Rebuild();
+            EnsureInitialized();
         }
 
         private void Update()
@@ -101,10 +112,6 @@ namespace Fofuxo.GameplayAbilitySystem
             Tick(Time.deltaTime);
         }
 
-        /// <summary>
-        /// Rebuilds runtime values from the authored initials. Used at startup
-        /// and by tests that configure initials after construction.
-        /// </summary>
         /// <summary>
         /// Points this set at shared savable defaults and rebuilds immediately.
         /// </summary>
@@ -114,10 +121,15 @@ namespace Fofuxo.GameplayAbilitySystem
             Rebuild();
         }
 
+        /// <summary>
+        /// Rebuilds runtime values from the authored initials. Used at startup
+        /// and by tests that configure initials after construction.
+        /// </summary>
         public void Rebuild()
         {
+            initialized = true;
             values.Clear();
-            durationEntries.Clear();
+            slotOwners.Clear();
             InitialValue[] initials = definition != null ? definition.InitialValues : initialValues;
             foreach (InitialValue initial in initials)
             {
@@ -145,6 +157,23 @@ namespace Fofuxo.GameplayAbilitySystem
             return GetOrCreate(attribute).BaseValue;
         }
 
+        /// <summary>
+        /// Every attribute this set holds a value for, with its live aggregate.
+        /// A read-only view for tooling; writes go through the modifier calls.
+        /// </summary>
+        public IReadOnlyDictionary<GameplayAttribute, AttributeValue> Values
+        {
+            get
+            {
+                EnsureInitialized();
+                return values;
+            }
+        }
+
+        /// <summary>
+        /// Folds a change into the base value, permanently. This is what an
+        /// instant effect and every period of a periodic one do.
+        /// </summary>
         public void ApplyInstantModifier(AttributeModifier modifier)
         {
             if (modifier.Attribute.IsEmpty)
@@ -182,158 +211,75 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
-        /// Applies a duration modifier with a stacking policy. Stacking matches
-        /// on attribute, operation, and source. Zero or negative durations
-        /// behave as instant modifiers.
+        /// Attaches a modifier that contributes to the current value until its
+        /// slot is removed. The returned slot id is the only way to detach this
+        /// exact modifier, which is what lets two identical applications from
+        /// one source coexist.
         /// </summary>
-        /// <returns>True when the modifier is (or stays) applied.</returns>
-        public bool ApplyDurationModifier(
-            AttributeModifier modifier,
-            float durationSeconds,
-            EffectStacking stacking)
+        /// <returns>The slot id, or zero when the attribute is empty.</returns>
+        public int AddModifier(AttributeModifier modifier)
         {
             if (modifier.Attribute.IsEmpty)
-            {
-                return false;
-            }
-
-            if (durationSeconds <= 0f)
-            {
-                ApplyInstantModifier(modifier);
-                return true;
-            }
-
-            int existing = durationEntries.FindIndex(entry =>
-                entry.Modifier.Attribute == modifier.Attribute &&
-                entry.Modifier.Operation == modifier.Operation &&
-                entry.Modifier.Source == modifier.Source);
-            if (existing >= 0)
-            {
-                switch (stacking)
-                {
-                    case EffectStacking.Ignore:
-                        return true;
-                    case EffectStacking.Refresh:
-                        durationEntries[existing] = new DurationEntry(
-                            modifier, durationSeconds);
-                        EmitIfChanged(modifier.Attribute, modifier.Source);
-                        return true;
-                }
-            }
-
-            AttributeValue value = GetOrCreate(modifier.Attribute);
-            float oldValue = value.CurrentValue;
-            value.AddModifier(modifier);
-            durationEntries.Add(new DurationEntry(modifier, durationSeconds));
-            EmitIfChanged(modifier.Attribute, modifier.Source, oldValue);
-            return true;
-        }
-
-        /// <summary>
-        /// Applies a periodic modifier (damage or heal over time). Every
-        /// period the modifier is applied as an instant change to the base
-        /// value, exactly like Unreal's periodic gameplay effects. Stacking
-        /// matches on attribute, operation, and source.
-        /// Zero or negative durations behave as a single instant modifier;
-        /// zero or negative periods also collapse to one instant application.
-        /// </summary>
-        /// <returns>True when the modifier is (or stays) applied.</returns>
-        public bool ApplyPeriodicModifier(
-            AttributeModifier modifier,
-            float durationSeconds,
-            float periodSeconds,
-            EffectStacking stacking)
-        {
-            if (modifier.Attribute.IsEmpty)
-            {
-                return false;
-            }
-
-            if (durationSeconds <= 0f || periodSeconds <= 0f)
-            {
-                ApplyInstantModifier(modifier);
-                return true;
-            }
-
-            int existing = durationEntries.FindIndex(entry =>
-                entry.IsPeriodic &&
-                entry.Modifier.Attribute == modifier.Attribute &&
-                entry.Modifier.Operation == modifier.Operation &&
-                entry.Modifier.Source == modifier.Source);
-            if (existing >= 0)
-            {
-                switch (stacking)
-                {
-                    case EffectStacking.Ignore:
-                        return true;
-                    case EffectStacking.Refresh:
-                        durationEntries[existing] = DurationEntry.Periodic(
-                            modifier, durationSeconds, periodSeconds);
-                        return true;
-                }
-            }
-
-            durationEntries.Add(DurationEntry.Periodic(
-                modifier, durationSeconds, periodSeconds));
-            return true;
-        }
-
-        /// <summary>
-        /// Externally removes active duration and periodic modifiers, e.g. for
-        /// cleanse or stun-break effects. Matches attribute, and source when
-        /// one is provided (a null source matches any source). Duration
-        /// modifiers detach from the value exactly like on expiry, firing
-        /// <see cref="Changed"/> when the current value moves. Periodic
-        /// entries only stop future ticks: applied ticks already folded into
-        /// the base value and are never refunded.
-        /// </summary>
-        /// <returns>Number of active entries removed.</returns>
-        public int RemoveModifiers(GameplayAttribute attribute, UnityEngine.Object source = null)
-        {
-            if (attribute.IsEmpty)
             {
                 return 0;
             }
 
-            int removed = 0;
-            for (int i = durationEntries.Count - 1; i >= 0; i--)
-            {
-                DurationEntry entry = durationEntries[i];
-                if (entry.Modifier.Attribute != attribute)
-                {
-                    continue;
-                }
-
-                if (source != null && entry.Modifier.Source != source)
-                {
-                    continue;
-                }
-
-                durationEntries.RemoveAt(i);
-                removed++;
-
-                if (entry.IsPeriodic)
-                {
-                    continue;
-                }
-
-                AttributeValue value = GetOrCreate(entry.Modifier.Attribute);
-                float oldValue = value.CurrentValue;
-                value.RemoveModifier(entry.Modifier);
-                float newValue = value.CurrentValue;
-                if (!Mathf.Approximately(oldValue, newValue))
-                {
-                    Changed?.Invoke(new AttributeValueChanged(
-                        entry.Modifier.Attribute, oldValue, newValue, entry.Modifier.Source));
-                }
-            }
-
-            return removed;
+            AttributeValue value = GetOrCreate(modifier.Attribute);
+            float oldValue = value.CurrentValue;
+            nextSlot++;
+            value.AddModifier(nextSlot, modifier);
+            slotOwners[nextSlot] = modifier.Attribute;
+            EmitIfChanged(modifier.Attribute, modifier.Source, oldValue);
+            return nextSlot;
         }
 
         /// <summary>
-        /// Advances regeneration and duration expiry. Called automatically;
-        /// public so tests can step time deterministically.
+        /// Replaces the modifier in a slot, for a magnitude that was recalculated
+        /// while the effect stayed active.
+        /// </summary>
+        public bool UpdateModifier(int slot, AttributeModifier modifier)
+        {
+            if (!slotOwners.TryGetValue(slot, out GameplayAttribute attribute) ||
+                attribute != modifier.Attribute)
+            {
+                return false;
+            }
+
+            AttributeValue value = GetOrCreate(attribute);
+            float oldValue = value.CurrentValue;
+            if (!value.UpdateModifier(slot, modifier))
+            {
+                return false;
+            }
+
+            EmitIfChanged(attribute, modifier.Source, oldValue);
+            return true;
+        }
+
+        /// <summary>Detaches the modifier in a slot. False when it was already gone.</summary>
+        public bool RemoveModifier(int slot)
+        {
+            if (!slotOwners.TryGetValue(slot, out GameplayAttribute attribute))
+            {
+                return false;
+            }
+
+            slotOwners.Remove(slot);
+            AttributeValue value = GetOrCreate(attribute);
+            float oldValue = value.CurrentValue;
+            if (!value.RemoveModifier(slot))
+            {
+                return false;
+            }
+
+            EmitIfChanged(attribute, null, oldValue);
+            return true;
+        }
+
+        /// <summary>
+        /// Advances regeneration. Called automatically; public so tests can step
+        /// time deterministically. Effect durations and periods are aged by
+        /// <see cref="GameplayEffectContainer.Tick"/>, not here.
         /// </summary>
         public void Tick(float deltaTime)
         {
@@ -354,120 +300,41 @@ namespace Fofuxo.GameplayAbilitySystem
                 ApplyInstantModifier(new AttributeModifier(
                     entry.Attribute, AttributeOperation.Add, entry.PerSecond * step));
             }
-
-            for (int i = durationEntries.Count - 1; i >= 0; i--)
-            {
-                DurationEntry entry = durationEntries[i];
-                float remaining = entry.Remaining - step;
-                if (entry.IsPeriodic)
-                {
-                    TickPeriodicEntry(i, entry, remaining, step);
-                    continue;
-                }
-
-                if (remaining > 0f)
-                {
-                    durationEntries[i] = new DurationEntry(entry.Modifier, remaining);
-                    continue;
-                }
-
-                durationEntries.RemoveAt(i);
-                AttributeValue value = GetOrCreate(entry.Modifier.Attribute);
-                float oldValue = value.CurrentValue;
-                value.RemoveModifier(entry.Modifier);
-                float newValue = value.CurrentValue;
-                if (!Mathf.Approximately(oldValue, newValue))
-                {
-                    Changed?.Invoke(new AttributeValueChanged(
-                        entry.Modifier.Attribute, oldValue, newValue, entry.Modifier.Source));
-                }
-            }
-        }
-
-        private void TickPeriodicEntry(
-            int index, DurationEntry entry, float remaining, float step)
-        {
-            if (remaining <= 0f)
-            {
-                durationEntries.RemoveAt(index);
-                return;
-            }
-
-            float accumulator = entry.Accumulator + step;
-            int applications = 0;
-            while (accumulator >= entry.Period && entry.Period > 0f)
-            {
-                accumulator -= entry.Period;
-                applications++;
-            }
-
-            durationEntries[index] = entry.WithRemainingAndAccumulator(remaining, accumulator);
-            for (int application = 0; application < applications; application++)
-            {
-                ApplyInstantModifier(entry.Modifier);
-            }
         }
 
         private void EmitIfChanged(
             GameplayAttribute attribute,
             UnityEngine.Object source,
-            float? oldValue = null)
+            float oldValue)
         {
             AttributeValue value = GetOrCreate(attribute);
-            float before = oldValue ?? value.CurrentValue;
             float after = value.CurrentValue;
-            if (!Mathf.Approximately(before, after))
+            if (!Mathf.Approximately(oldValue, after))
             {
-                Changed?.Invoke(new AttributeValueChanged(attribute, before, after, source));
+                Changed?.Invoke(new AttributeValueChanged(attribute, oldValue, after, source));
             }
         }
 
-        private readonly struct DurationEntry
+        /// <summary>
+        /// Builds the authored initials on first access. Unity does not
+        /// guarantee the Awake order of components sharing a GameObject, so a
+        /// consumer reading attributes from its own Awake would otherwise see
+        /// an empty set.
+        /// </summary>
+        private void EnsureInitialized()
         {
-            public DurationEntry(AttributeModifier modifier, float remaining)
+            if (initialized)
             {
-                Modifier = modifier;
-                Remaining = remaining;
-                Period = 0f;
-                Accumulator = 0f;
+                return;
             }
 
-            private DurationEntry(
-                AttributeModifier modifier,
-                float remaining,
-                float period,
-                float accumulator)
-            {
-                Modifier = modifier;
-                Remaining = remaining;
-                Period = period;
-                Accumulator = accumulator;
-            }
-
-            public static DurationEntry Periodic(
-                AttributeModifier modifier,
-                float durationSeconds,
-                float periodSeconds)
-            {
-                return new DurationEntry(modifier, durationSeconds, periodSeconds, 0f);
-            }
-
-            public DurationEntry WithRemainingAndAccumulator(
-                float remaining,
-                float accumulator)
-            {
-                return new DurationEntry(Modifier, remaining, Period, accumulator);
-            }
-
-            public AttributeModifier Modifier { get; }
-            public float Remaining { get; }
-            public float Period { get; }
-            public float Accumulator { get; }
-            public bool IsPeriodic => Period > 0f;
+            Rebuild();
         }
 
         private AttributeValue GetOrCreate(GameplayAttribute attribute)
         {
+            EnsureInitialized();
+
             if (!values.TryGetValue(attribute, out AttributeValue value))
             {
                 value = new AttributeValue(0f, 0f, float.PositiveInfinity);

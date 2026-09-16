@@ -1,0 +1,700 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-8470098732537848316
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 535184bad31645846a21407b5b086505, type: 3}
+  m_Name: GE_Damage_SampleCombo01
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.DamageEffectDefinition
+  effectId: 
+  targeting:
+    mode: 2
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 1
+      localCenter: {x: 0, y: 1, z: 1.2}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0.05, y: 0.05, z: 0.05}
+      radius: 1.2
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 3
+    restrictToAbilityTarget: 0
+  durationPolicy: 0
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 0
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags: []
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  cueTag:
+    value: Cue.Sample.Impact
+  cueReplacements:
+  - outcome: 4
+    cue:
+      value: Cue.Sample.Parry
+  targetAttribute:
+    id: Combat.Health
+  damage:
+    baseValue: 8
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  linearFalloff: 0
+  knockbackDirection: 0
+  horizontalKnockback: 0
+  verticalKnockback: 0
+  knockbackDuration: 0
+  reactionEventTag:
+    value: Event.HitReaction
+  canBeParried: 1
+--- !u!114 &-7697501939683169021
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 535184bad31645846a21407b5b086505, type: 3}
+  m_Name: GE_Damage_SampleCombo02
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.DamageEffectDefinition
+  effectId: 
+  targeting:
+    mode: 2
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 1
+      localCenter: {x: 0, y: 1, z: 1.2}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0.05, y: 0.05, z: 0.05}
+      radius: 1.2
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 3
+    restrictToAbilityTarget: 0
+  durationPolicy: 0
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 0
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags: []
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  cueTag:
+    value: Cue.Sample.Impact
+  cueReplacements:
+  - outcome: 4
+    cue:
+      value: Cue.Sample.Parry
+  targetAttribute:
+    id: Combat.Health
+  damage:
+    baseValue: 10
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  linearFalloff: 0
+  knockbackDirection: 0
+  horizontalKnockback: 0
+  verticalKnockback: 0
+  knockbackDuration: 0
+  reactionEventTag:
+    value: Event.HitReaction
+  canBeParried: 1
+--- !u!114 &-6935685143008052977
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 535184bad31645846a21407b5b086505, type: 3}
+  m_Name: GE_Damage_SampleCombo01Poise
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.DamageEffectDefinition
+  effectId: 
+  targeting:
+    mode: 2
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 1
+      localCenter: {x: 0, y: 1, z: 1.2}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0.05, y: 0.05, z: 0.05}
+      radius: 1.2
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 3
+    restrictToAbilityTarget: 0
+  durationPolicy: 0
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 0
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags: []
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  cueTag:
+    value: 
+  cueReplacements: []
+  targetAttribute:
+    id: Combat.Poise
+  damage:
+    baseValue: 12
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  linearFalloff: 0
+  knockbackDirection: 0
+  horizontalKnockback: 0
+  verticalKnockback: 0
+  knockbackDuration: 0
+  reactionEventTag:
+    value: 
+  canBeParried: 1
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ac2ce4a75f315fa0e3abadbd4ab599b, type: 3}
+  m_Name: GA_Sample_Combo
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.TimelineAbilityDefinition
+  abilityId: sample.combo
+  requiresTarget: 0
+  minimumRange: 0
+  maximumRange: 3
+  maximumFacingAngle: 180
+  targetAssist: {fileID: 11400000, guid: 2aa1690127898b741a169fffb60475ff, type: 2}
+  cooldown: 0
+  cooldownStartPolicy: 0
+  cancelPolicy: 0
+  cancelledByTags: []
+  lockMovementDuringAbility: 1
+  activationInputPolicy: 0
+  activationHoldDuration: 0.25
+  groupTag:
+    value: 
+  groupExclusionPolicy: 0
+  activationTriggers: []
+  costs: []
+  maxCharges: 0
+  chargeRestoreTime: 0
+  requiredTags: []
+  blockedTags: []
+  grantedTags: []
+  onParryEffects: []
+  baseAiWeight: 1
+  previewAnimationClip: {fileID: 0}
+  steps:
+  - animationClip: {fileID: 0}
+    animationBlendDuration: 0.08
+    startupEndFrame: 6
+    activeEndFrame: 12
+    recoveryEndFrame: 32
+    fallbackFrameRate: 60
+    movementUnlockFrame: 26
+    comboContinuationFrame: 14
+    comboInputEndFrame: 28
+    comboInputGraceFrames: 5
+    branches: []
+    tagWindows:
+    - tag:
+        value: State.Attacking
+      startFrame: 1
+      endFrame: 0
+    targetAssist: {fileID: 0}
+    displacementDirection: 0
+    displacementDistance: 0
+    displacementStartFrame: 1
+    displacementEndFrame: 1
+    effectTriggers:
+    - frame: 9
+      effect: {fileID: -8470098732537848316}
+      level: 1
+    - frame: 9
+      effect: {fileID: -6935685143008052977}
+      level: 1
+    cueTriggers:
+    - frame: 9
+      cue:
+        value: Cue.Sample.Swing
+      suppressOnMiss: 0
+  - animationClip: {fileID: 0}
+    animationBlendDuration: 0.08
+    startupEndFrame: 6
+    activeEndFrame: 12
+    recoveryEndFrame: 32
+    fallbackFrameRate: 60
+    movementUnlockFrame: 26
+    comboContinuationFrame: 14
+    comboInputEndFrame: 28
+    comboInputGraceFrames: 5
+    branches: []
+    tagWindows:
+    - tag:
+        value: State.Attacking
+      startFrame: 1
+      endFrame: 0
+    targetAssist: {fileID: 0}
+    displacementDirection: 0
+    displacementDistance: 0
+    displacementStartFrame: 1
+    displacementEndFrame: 1
+    effectTriggers:
+    - frame: 9
+      effect: {fileID: -7697501939683169021}
+      level: 1
+    - frame: 9
+      effect: {fileID: 7530536170838935877}
+      level: 1
+    cueTriggers:
+    - frame: 9
+      cue:
+        value: Cue.Sample.Swing
+      suppressOnMiss: 0
+  - animationClip: {fileID: 0}
+    animationBlendDuration: 0.08
+    startupEndFrame: 6
+    activeEndFrame: 12
+    recoveryEndFrame: 42
+    fallbackFrameRate: 60
+    movementUnlockFrame: 36
+    comboContinuationFrame: 14
+    comboInputEndFrame: 38
+    comboInputGraceFrames: 5
+    branches: []
+    tagWindows:
+    - tag:
+        value: State.Attacking
+      startFrame: 1
+      endFrame: 0
+    targetAssist: {fileID: 0}
+    displacementDirection: 0
+    displacementDistance: 0
+    displacementStartFrame: 1
+    displacementEndFrame: 1
+    effectTriggers:
+    - frame: 9
+      effect: {fileID: 6763555245815259569}
+      level: 1
+    cueTriggers:
+    - frame: 9
+      cue:
+        value: Cue.Sample.Swing
+      suppressOnMiss: 0
+  stepAdvancement: 1
+  stepAdvanceEventTag:
+    value: 
+  stepTimeoutPolicy: 0
+--- !u!114 &6763555245815259569
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 535184bad31645846a21407b5b086505, type: 3}
+  m_Name: GE_Damage_SampleCombo03
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.DamageEffectDefinition
+  effectId: 
+  targeting:
+    mode: 2
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 1
+      localCenter: {x: 0, y: 1, z: 1.2}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0.05, y: 0.05, z: 0.05}
+      radius: 1.2
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 3
+    restrictToAbilityTarget: 0
+  durationPolicy: 0
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 0
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags: []
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  cueTag:
+    value: Cue.Sample.Impact
+  cueReplacements:
+  - outcome: 4
+    cue:
+      value: Cue.Sample.Parry
+  targetAttribute:
+    id: Combat.Health
+  damage:
+    baseValue: 18
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  linearFalloff: 0
+  knockbackDirection: 0
+  horizontalKnockback: 6
+  verticalKnockback: 2
+  knockbackDuration: 0.25
+  reactionEventTag:
+    value: Event.Knockdown
+  canBeParried: 1
+--- !u!114 &7530536170838935877
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 535184bad31645846a21407b5b086505, type: 3}
+  m_Name: GE_Damage_SampleCombo02Poise
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.DamageEffectDefinition
+  effectId: 
+  targeting:
+    mode: 2
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 1
+      localCenter: {x: 0, y: 1, z: 1.2}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0.05, y: 0.05, z: 0.05}
+      radius: 1.2
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 3
+    restrictToAbilityTarget: 0
+  durationPolicy: 0
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 0
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags: []
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  cueTag:
+    value: 
+  cueReplacements: []
+  targetAttribute:
+    id: Combat.Poise
+  damage:
+    baseValue: 15
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+  linearFalloff: 0
+  knockbackDirection: 0
+  horizontalKnockback: 0
+  verticalKnockback: 0
+  knockbackDuration: 0
+  reactionEventTag:
+    value: 
+  canBeParried: 1

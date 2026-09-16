@@ -2,7 +2,7 @@
   "name": "com.uayten.fofuxogameplayabilitysystem",
   "displayName": "Fofuxo's Gameplay Ability System",
   "version": "0.1.0",
-  "unity": "6000.0",
+  "unity": "6000.6",
   "description": "A lightweight Unreal-GAS-inspired ability system for Unity: data-driven abilities as ScriptableObjects, frame-based phases, gameplay tags, cooldowns, sequences and pluggable damage effects.",
   "author": {
     "name": "uayten"
@@ -18,5 +18,12 @@
   "dependencies": {
     "com.unity.inputsystem": "1.20.0"
   },
+  "samples": [
+    {
+      "displayName": "Melee Combat",
+      "description": "A combo with steps, a roll, a block that parries, target assist, damage, poise, knockback and cues, driven by player input and a minimal AI. Includes a profiling scene.",
+      "path": "Samples~/MeleeCombat"
+    }
+  ],
   "hideInEditor": false
 }

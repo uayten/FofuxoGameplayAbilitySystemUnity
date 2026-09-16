@@ -3,75 +3,84 @@ using UnityEngine;
 namespace Fofuxo.GameplayAbilitySystem
 {
     /// <summary>
-    /// Shape drawn by <see cref="DebugDrawEffectDefinition"/>.
-    /// </summary>
-    public enum DebugDrawShape
-    {
-        Sphere,
-        Box,
-        Capsule,
-    }
-
-    /// <summary>
-    /// Draws a wireframe shape at an ability timeline frame with a configurable
-    /// screen lifetime, mirroring the query volume of a damage effect so tells
-    /// and hit frames can be tuned visually. Registers no hits, deals no
-    /// damage, and compiles out of player builds through
-    /// <see cref="AbilityDebugDraw"/>.
+    /// Draws the wireframe of the effect targeting shape at an ability timeline
+    /// frame with a configurable screen lifetime, so tells and hit frames can be
+    /// tuned visually. Registers no hits, deals no damage, and compiles out of
+    /// player builds through <see cref="AbilityDebugDraw"/>.
+    ///
+    /// It declares no geometry of its own. Copying a damage effect targeting
+    /// into this asset is the point: the drawing and the query then read the
+    /// same fields, and a shape that was tuned on screen is the shape that hits.
     /// </summary>
     [CreateAssetMenu(
-        fileName = "DebugDrawEffect",
+        fileName = "GE_DebugDraw",
         menuName = "Fofuxo/Abilities/Effects/Debug Draw")]
-    public sealed class DebugDrawEffectDefinition : AbilityEffectDefinition
+    public sealed class DebugDrawEffectDefinition : GameplayEffectDefinition
     {
-        [SerializeField] private DebugDrawShape shape = DebugDrawShape.Sphere;
-        [SerializeField] private Vector3 localCenter = new(0f, 1f, 1f);
-        [SerializeField] private Vector3 localEnd = new(0f, 1f, 3f);
-        [SerializeField] private Vector3 halfExtents = new(1f, 1f, 1f);
-        [SerializeField, Min(0.05f)] private float radius = 1f;
+
+        [Header("Drawing")]
         [SerializeField] private Color color = new(1f, 0.85f, 0.1f, 1f);
-        [SerializeField, Min(0f)] private float duration = 1f;
+        [SerializeField, Min(0f)] private float drawDuration = 1f;
 
-        public override void Apply(AbilityEffectContext context)
+        public Color Color => color;
+        public float DrawDuration => Mathf.Max(0f, drawDuration);
+
+        protected override bool Execute(GameplayEffectSpec spec, bool periodic)
         {
-            if (context.Owner == null)
+            if (spec.Source == null)
             {
-                return;
+                return false;
             }
 
-            Transform ownerTransform = context.Owner.transform;
-            switch (shape)
-            {
-                case DebugDrawShape.Box:
-                    AbilityDebugDraw.Box(
-                        ownerTransform.TransformPoint(localCenter),
-                        halfExtents,
-                        ownerTransform.rotation,
-                        color,
-                        duration);
-                    break;
-                case DebugDrawShape.Capsule:
-                    AbilityDebugDraw.Capsule(
-                        ownerTransform.TransformPoint(localCenter),
-                        ownerTransform.TransformPoint(localEnd),
-                        radius,
-                        color,
-                        duration);
-                    break;
-                default:
-                    AbilityDebugDraw.Sphere(
-                        ownerTransform.TransformPoint(localCenter),
-                        radius,
-                        color,
-                        duration);
-                    break;
-            }
+            AbilityContext abilityContext = spec.Context;
+            HitShape shape = Targeting.Shape;
+            AbilityDebugDraw.Shape(
+                in shape,
+                spec.Source.transform,
+                abilityContext.AimPoint,
+                abilityContext.Direction,
+                color,
+                drawDuration);
+            return true;
         }
 
-        private void OnValidate()
+        public override bool TryValidate(out string error)
         {
-            radius = Mathf.Max(0.05f, radius);
-            duration = Mathf.Max(0f, duration);
+            if (!base.TryValidate(out error))
+            {
+                return false;
+            }
+
+            if (DurationPolicy != GameplayEffectDurationPolicy.Instant)
+            {
+                error =
+                    "A debug draw is a one-shot: it draws when it executes and its " +
+                    "lifetime is Draw Duration, not the effect duration. Use the " +
+                    "Instant policy.";
+                return false;
+            }
+
+            if (drawDuration <= 0f)
+            {
+                error = "Draw Duration is zero, so the wireframe never appears.";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        internal void ConfigureDrawForTests(HitShape shape, Color drawColor, float lifetime)
+        {
+            SetTargetingForTests(GameplayEffectTargeting.Owner.WithShape(shape));
+            color = drawColor;
+            drawDuration = lifetime;
+        }
+
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            drawDuration = Mathf.Max(0f, drawDuration);
         }
     }
 }

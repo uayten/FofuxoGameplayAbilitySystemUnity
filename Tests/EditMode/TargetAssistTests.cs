@@ -7,33 +7,9 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 {
     public sealed class TargetAssistTests
     {
-        private sealed class StubReceiver : MonoBehaviour, IAbilityDamageReceiver
+        /// <summary>Makes a collider an actor; the assist accepts any living actor on its layers.</summary>
+        private sealed class StubReceiver : AttributeSet
         {
-            public bool Damageable = true;
-            public bool IsDamageable => Damageable;
-            public bool TryReceiveDamage(AbilityHitInfo hit) => Damageable;
-        }
-
-        [Test]
-        public void AssistCannotNestAnotherAbility()
-        {
-            TargetAssistDefinition outer =
-                ScriptableObject.CreateInstance<TargetAssistDefinition>();
-            TargetAssistDefinition inner =
-                ScriptableObject.CreateInstance<TargetAssistDefinition>();
-            try
-            {
-                SetField<AbilityDefinition, string>(outer, "abilityId", "test.assist.outer");
-                SetField<AbilityDefinition, string>(inner, "abilityId", "test.assist.inner");
-                outer.SetNestedAssistForTests(inner);
-                Assert.IsFalse(outer.TryValidate(out string error));
-                Assert.IsTrue(error.Contains("nest"));
-            }
-            finally
-            {
-                Object.DestroyImmediate(outer);
-                Object.DestroyImmediate(inner);
-            }
         }
 
         [Test]
@@ -41,7 +17,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         {
             GameObject owner = new("AssistOwner");
             GameObject target = new("AssistTarget");
-            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
             AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
             try
@@ -52,14 +28,15 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 
                 SetField(attack, "abilityId", "test.assist.attack");
                 SetField(attack, "requiresTarget", false);
-                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
                 SetField(assist, "targetLayers", MakeMask(1 << target.layer));
                 SetField(assist, "searchDistance", 5f);
                 SetField(assist, "coneHalfAngle", 90f);
                 SetField(assist, "proximityRadius", 0f);
-                attack.SetNestedAssistForTests(assist);
+                attack.SetTargetAssistForTests(assist);
                 SetField(loadout, "abilities", new[] { attack });
 
+                // The assist approaches by default, so the owner needs somewhere for that travel to land.
+                owner.AddComponent<Rigidbody>();
                 AbilitySystem system = owner.AddComponent<AbilitySystem>();
                 SetField(system, "loadout", loadout);
                 Physics.SyncTransforms();
@@ -86,19 +63,20 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void ActivationWithoutTargetKeepsFacing()
         {
             GameObject owner = new("AssistOwner");
-            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
             AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
             try
             {
                 SetField(attack, "abilityId", "test.assist.attack");
                 SetField(attack, "requiresTarget", false);
-                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
                 SetField(assist, "targetLayers", MakeMask(-1));
                 SetField(assist, "searchDistance", 5f);
-                attack.SetNestedAssistForTests(assist);
+                attack.SetTargetAssistForTests(assist);
                 SetField(loadout, "abilities", new[] { attack });
 
+                // The assist approaches by default, so the owner needs somewhere for that travel to land.
+                owner.AddComponent<Rigidbody>();
                 AbilitySystem system = owner.AddComponent<AbilitySystem>();
                 SetField(system, "loadout", loadout);
                 Vector3 before = owner.transform.forward;
@@ -141,7 +119,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         {
             GameObject owner = new("AssistOwner");
             GameObject target = new("AssistTarget");
-            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
             AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
             try
@@ -152,14 +130,15 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 
                 SetField(attack, "abilityId", "test.assist.attack");
                 SetField(attack, "requiresTarget", false);
-                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
                 SetField(assist, "targetLayers", MakeMask(1 << target.layer));
                 SetField(assist, "searchDistance", 0f);
                 SetField(assist, "proximityRadius", 4f);
                 SetField(assist, "coneHalfAngle", 35f);
-                attack.SetNestedAssistForTests(assist);
+                attack.SetTargetAssistForTests(assist);
                 SetField(loadout, "abilities", new[] { attack });
 
+                // The assist approaches by default, so the owner needs somewhere for that travel to land.
+                owner.AddComponent<Rigidbody>();
                 AbilitySystem system = owner.AddComponent<AbilitySystem>();
                 SetField(system, "loadout", loadout);
                 Physics.SyncTransforms();
@@ -184,7 +163,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         {
             GameObject owner = new("AssistOwner");
             GameObject target = new("AssistTarget");
-            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
             AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
             try
@@ -196,15 +175,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 
                 SetField(attack, "abilityId", "test.assist.attack");
                 SetField(attack, "requiresTarget", false);
-                SetField(attack, "startupEndFrame", 20);
-                SetField(attack, "activeEndFrame", 21);
-                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
+                attack.FirstStepForTests.ConfigureForTests(20, 21, 60, 60f);
                 SetField(assist, "targetLayers", MakeMask(1 << target.layer));
                 SetField(assist, "searchDistance", 0f);
                 SetField(assist, "proximityRadius", 4f);
                 SetField(assist, "approachTarget", true);
-                SetField(assist, "stoppingDistance", 0f);
-                attack.SetNestedAssistForTests(assist);
+                SetField(assist, "stoppingGap", 0f);
+                attack.SetTargetAssistForTests(assist);
                 SetField(loadout, "abilities", new[] { attack });
 
                 AbilitySystem system = owner.AddComponent<AbilitySystem>();
@@ -229,15 +206,156 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void ApproachAndParentDisplacementCannotShareOneAbility()
         {
-            AbilityDefinition attack = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
             try
             {
                 SetField(attack, "abilityId", "test.assist.attack");
-                SetField<AbilityDefinition, string>(assist, "abilityId", "test.assist");
                 SetField(assist, "approachTarget", true);
-                attack.SetNestedAssistForTests(assist);
-                attack.ConfigureDisplacementForTests(
+                attack.SetTargetAssistForTests(assist);
+                attack.FirstStepForTests.ConfigureDisplacementForTests(
+                    AbilityDisplacementDirection.Context,
+                    1f,
+                    1,
+                    2);
+
+                Assert.IsFalse(attack.TryValidate(out string error));
+                StringAssert.Contains("displacement", error);
+            }
+            finally
+            {
+                Object.DestroyImmediate(attack);
+                Object.DestroyImmediate(assist);
+            }
+        }
+
+        [Test]
+        public void ApproachStopsWhenTheTwoBodiesAlmostTouch()
+        {
+            GameObject owner = new("AssistOwner");
+            GameObject target = new("AssistTarget");
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
+            try
+            {
+                owner.AddComponent<Rigidbody>();
+                owner.AddComponent<SphereCollider>().radius = 1f;
+                target.transform.position = Vector3.forward * 7f;
+                target.AddComponent<SphereCollider>().radius = 0.5f;
+                target.AddComponent<StubReceiver>();
+
+                SetField(attack, "abilityId", "test.assist.attack");
+                SetField(attack, "requiresTarget", false);
+                attack.FirstStepForTests.ConfigureForTests(20, 21, 60, 60f);
+                SetField(assist, "targetLayers", MakeMask(1 << target.layer));
+                SetField(assist, "searchDistance", 12f);
+                SetField(assist, "proximityRadius", 0f);
+                SetField(assist, "coneHalfAngle", 45f);
+                SetField(assist, "approachTarget", true);
+                SetField(assist, "stoppingGap", 0.05f);
+                attack.SetTargetAssistForTests(assist);
+                SetField(loadout, "abilities", new[] { attack });
+
+                AbilitySystem system = owner.AddComponent<AbilitySystem>();
+                SetField(system, "loadout", loadout);
+                Physics.SyncTransforms();
+
+                Assert.IsTrue(system.TryActivate(
+                    attack, AbilityContext.FromDirection(owner, null, Vector3.forward)));
+
+                // 7 m apart, minus the target's 0.5 surface, the owner's own 1.0
+                // and the 0.05 gap left between them.
+                Assert.AreEqual(5.45f, system.PlannedDisplacementDistanceForTests, 0.02f);
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(attack);
+                Object.DestroyImmediate(assist);
+                Object.DestroyImmediate(loadout);
+            }
+        }
+
+        [Test]
+        public void EveryStepWithAnAssistReacquiresItsOwnTarget()
+        {
+            GameObject owner = new("AssistOwner");
+            GameObject first = new("FirstTarget");
+            GameObject second = new("SecondTarget");
+            TimelineAbilityDefinition combo = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            AbilityLoadout loadout = ScriptableObject.CreateInstance<AbilityLoadout>();
+            try
+            {
+                owner.AddComponent<Rigidbody>();
+                first.transform.position = Vector3.forward * 2f;
+                first.AddComponent<SphereCollider>().radius = 0.5f;
+                first.AddComponent<StubReceiver>();
+                AbilitySystem firstSystem = first.AddComponent<AbilitySystem>();
+                second.transform.position = Vector3.right * 3f;
+                second.AddComponent<SphereCollider>().radius = 0.5f;
+                second.AddComponent<StubReceiver>();
+
+                SetField(combo, "abilityId", "test.assist.combo");
+                SetField(combo, "requiresTarget", false);
+                SetField(assist, "targetLayers", MakeMask(1 << first.layer));
+                SetField(assist, "searchDistance", 12f);
+                SetField(assist, "proximityRadius", 12f);
+                SetField(assist, "approachTarget", false);
+
+                AbilityStep stepOne = new();
+                stepOne.ConfigureForTests(1, 2, 3, 60f);
+                stepOne.SetTargetAssistForTests(assist);
+                AbilityStep stepTwo = new();
+                stepTwo.ConfigureForTests(1, 2, 3, 60f);
+                stepTwo.SetTargetAssistForTests(assist);
+                combo.SetStepsForTests(stepOne, stepTwo);
+                SetField(loadout, "abilities", new[] { combo });
+
+                AbilitySystem system = owner.AddComponent<AbilitySystem>();
+                SetField(system, "loadout", loadout);
+                Physics.SyncTransforms();
+
+                Assert.IsTrue(system.TryActivate(
+                    combo, AbilityContext.FromDirection(owner, null, Vector3.forward)));
+                Assert.AreEqual(first, system.ActiveContext?.Target);
+
+                // The first target stops being a valid one between the swings:
+                // dead is a tag, and the filter skips whoever holds it.
+                firstSystem.SetLooseTag(CommonGameplayTags.Dead, true);
+                for (int i = 0; i < 4; i++)
+                {
+                    system.Tick(1f / 60f);
+                }
+
+                Assert.AreEqual(1, system.ActiveStepIndex);
+
+                Assert.AreEqual(second, system.ActiveContext?.Target);
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
+                Object.DestroyImmediate(first);
+                Object.DestroyImmediate(second);
+                Object.DestroyImmediate(combo);
+                Object.DestroyImmediate(assist);
+                Object.DestroyImmediate(loadout);
+            }
+        }
+
+        [Test]
+        public void ApproachAndDisplacementCannotShareOneStep()
+        {
+            TimelineAbilityDefinition attack = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            TargetAssistDefinition assist = ScriptableObject.CreateInstance<TargetAssistDefinition>();
+            try
+            {
+                SetField(attack, "abilityId", "test.assist.attack");
+                SetField(assist, "approachTarget", true);
+                attack.FirstStepForTests.SetTargetAssistForTests(assist);
+                attack.FirstStepForTests.ConfigureDisplacementForTests(
                     AbilityDisplacementDirection.Context,
                     1f,
                     1,
@@ -265,11 +383,24 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             string fieldName,
             TValue value)
         {
-            FieldInfo field = typeof(TTarget).GetField(
-                fieldName,
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(field, fieldName);
-            field.SetValue(target, value);
+            // Walks up the hierarchy: a private field of a base class is
+            // invisible to a single GetField call, and an ability's own fields
+            // sit one level above the timeline type most fixtures use.
+            for (System.Type type = typeof(TTarget); type != null; type = type.BaseType)
+            {
+                System.Reflection.FieldInfo field = type.GetField(
+                    fieldName,
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.DeclaredOnly);
+                if (field != null)
+                {
+                    field.SetValue(target, value);
+                    return;
+                }
+            }
+
+            Assert.Fail($"No field named {fieldName}.");
         }
     }
 }

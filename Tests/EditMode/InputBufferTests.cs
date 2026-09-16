@@ -41,17 +41,17 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void RejectedInput_IsRetriedUntilItFits()
         {
-            AbilityDefinition first = NewAbility("test.buffer.first");
-            AbilityDefinition second = NewAbility("test.buffer.second");
+            TimelineAbilityDefinition first = NewAbility("test.buffer.first");
+            TimelineAbilityDefinition second = NewAbility("test.buffer.second");
             Grant(first, second);
             SetField(router, "bufferWindow", 30f);
 
             AbilityContext context = AbilityContext.FromTarget(owner, null);
             Assert.IsTrue(system.TryActivate(first, context));
-            InvokeBinding(second, null);
+            InvokeBinding(second);
             Assert.AreEqual(first, system.ActiveAbility);
 
-            system.ForceCancelActiveAbility(AbilityCancelReason.Manual);
+            system.ForceCancelActiveAbility(CommonGameplayTags.CancelManual);
             InvokeUpdate();
             Assert.AreEqual(second, system.ActiveAbility);
         }
@@ -59,25 +59,25 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void ExpiredBuffer_IsDropped()
         {
-            AbilityDefinition first = NewAbility("test.buffer.first");
-            AbilityDefinition second = NewAbility("test.buffer.second");
+            TimelineAbilityDefinition first = NewAbility("test.buffer.first");
+            TimelineAbilityDefinition second = NewAbility("test.buffer.second");
             Grant(first, second);
             SetField(router, "bufferWindow", 0.05f);
 
             AbilityContext context = AbilityContext.FromTarget(owner, null);
             Assert.IsTrue(system.TryActivate(first, context));
-            InvokeBinding(second, null);
+            InvokeBinding(second);
 
             // Editor time does not advance mid-test; expire the buffer directly.
             SetField(router, "bufferExpiry", Time.time - 1f);
-            system.ForceCancelActiveAbility(AbilityCancelReason.Manual);
+            system.ForceCancelActiveAbility(CommonGameplayTags.CancelManual);
             InvokeUpdate();
             Assert.IsNull(system.ActiveAbility);
         }
 
-        private AbilityDefinition NewAbility(string id)
+        private TimelineAbilityDefinition NewAbility(string id)
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             owned.Add(ability);
             SetField(ability, "abilityId", id);
             SetField(ability, "requiresTarget", false);
@@ -92,13 +92,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             SetField(system, "loadout", loadout);
         }
 
-        private void InvokeBinding(AbilityDefinition ability, AbilitySequenceDefinition sequence)
+        private void InvokeBinding(TimelineAbilityDefinition ability)
         {
             MethodInfo method = typeof(AbilityInputRouter).GetMethod(
                 "TryActivateBinding",
                 BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(method);
-            method.Invoke(router, new object[] { ability, sequence });
+            method.Invoke(router, new object[] { ability });
         }
 
         private void InvokeUpdate()
@@ -112,11 +112,24 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 
         private static void SetField<TValue>(object target, string fieldName, TValue value)
         {
-            var field = target.GetType().GetField(
-                fieldName,
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Assert.IsNotNull(field, fieldName);
-            field.SetValue(target, value);
+            // Walks up the hierarchy: a private field of a base class is
+            // invisible to a single GetField call, and an ability's own fields
+            // sit one level above the timeline type most fixtures use.
+            for (System.Type type = target.GetType(); type != null; type = type.BaseType)
+            {
+                System.Reflection.FieldInfo field = type.GetField(
+                    fieldName,
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.DeclaredOnly);
+                if (field != null)
+                {
+                    field.SetValue(target, value);
+                    return;
+                }
+            }
+
+            Assert.Fail($"No field named {fieldName}.");
         }
     }
 }

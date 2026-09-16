@@ -6,7 +6,10 @@ namespace Fofuxo.GameplayAbilitySystem
     /// <summary>
     /// Lightweight runtime readout for tuning: logs ability and cue events and
     /// exposes a one-line summary (active ability, frame, tags) for Inspector
-    /// monitoring. Not a substitute for the planned runtime debugger window.
+    /// monitoring. The full readout is the Ability Debugger window
+    /// (Window > Fofuxo > Ability Debugger), which reads the actor's
+    /// <see cref="AbilitySystem.History"/>; this component is the one that
+    /// leaves a trail in the Console.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(AbilitySystem))]
@@ -36,12 +39,25 @@ namespace Fofuxo.GameplayAbilitySystem
                     tags.Append(tag.Value);
                 }
 
-                string active = abilitySystem.ActiveAbility != null
-                    ? abilitySystem.ActiveAbility.AbilityId
-                    : abilitySystem.ActiveSequence != null
-                        ? "sequence:" + abilitySystem.ActiveSequence.SequenceId
-                        : "(idle)";
-                return $"{active} frame={abilitySystem.ActiveFrame} tags=[{tags}]";
+                AbilityDefinition ability = abilitySystem.ActiveAbility;
+                var timeline = ability as TimelineAbilityDefinition;
+                string active = ability == null ? "(idle)" : ability.AbilityId;
+                string step = timeline != null && timeline.IsCombo
+                    ? $" step={abilitySystem.ActiveStepIndex + 1}/{timeline.StepCount}"
+                    : string.Empty;
+                // Only worth a line while a combo is waiting for something: what
+                // is buffered, and how many frames are left to buffer it in.
+                string intent = timeline != null && timeline.WaitsToAdvance
+                    ? $" intent={abilitySystem.QueuedStepIntent.Status}" +
+                      $" deadline={abilitySystem.ComboInputDeadlineFrame}" +
+                      (abilitySystem.IsHoldingLastStep ? " holding" : string.Empty)
+                    : string.Empty;
+                string concurrent = abilitySystem.ActiveAbilityCount > 1
+                    ? $" +{abilitySystem.ActiveAbilityCount - 1} concurrent"
+                    : string.Empty;
+                return $"{active}{step}{intent}{concurrent} " +
+                       $"frame={abilitySystem.ActiveFrame} tags=[{tags}] " +
+                       $"last={abilitySystem.LastTransition.Reason}";
             }
         }
 
@@ -88,9 +104,9 @@ namespace Fofuxo.GameplayAbilitySystem
             Log($"completed {ability.AbilityId}");
         }
 
-        private void OnAbilityCancelled(AbilityDefinition ability, AbilityCancelReason reason)
+        private void OnAbilityCancelled(AbilityDefinition ability, GameplayTag cancelTag)
         {
-            Log($"cancelled {ability.AbilityId} ({reason})");
+            Log($"cancelled {ability.AbilityId} ({cancelTag})");
         }
 
         private void OnAbilityWhiffed(AbilityDefinition ability, AbilityContext _)
@@ -98,12 +114,9 @@ namespace Fofuxo.GameplayAbilitySystem
             Log($"whiffed {ability.AbilityId}");
         }
 
-        private void OnGameplayCueTriggered(
-            AbilityDefinition _,
-            GameplayTag cue,
-            AbilityContext __)
+        private void OnGameplayCueTriggered(GameplayCueParameters cue)
         {
-            Log($"cue {cue.Value}");
+            Log($"cue {cue.Cue.Value} {cue.Event} {cue.Outcome}");
         }
 
         private void Log(string message)

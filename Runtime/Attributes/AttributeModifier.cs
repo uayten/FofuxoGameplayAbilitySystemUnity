@@ -3,6 +3,10 @@ using UnityEngine;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
+    /// <summary>
+    /// How a modifier folds into an attribute: added, multiplied as a 1 +
+    /// magnitude factor, or overriding every other contribution.
+    /// </summary>
     public enum AttributeOperation
     {
         Add,

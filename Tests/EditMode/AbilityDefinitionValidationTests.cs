@@ -9,7 +9,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void FreshAbility_HasNoId_AndFailsValidation()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 Assert.IsTrue(string.IsNullOrWhiteSpace(ability.AbilityId));
@@ -25,12 +25,12 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void DefaultFrames_MapToStartupActiveRecovery()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
-                Assert.AreEqual(AbilityPhase.Startup, ability.GetPhase(1));
-                Assert.AreEqual(AbilityPhase.Active, ability.GetPhase(2));
-                Assert.AreEqual(AbilityPhase.Recovery, ability.GetPhase(ability.RecoveryEndFrame));
+                Assert.AreEqual(AbilityPhase.Startup, ability.FirstStepForTests.GetPhase(1));
+                Assert.AreEqual(AbilityPhase.Active, ability.FirstStepForTests.GetPhase(2));
+                Assert.AreEqual(AbilityPhase.Recovery, ability.FirstStepForTests.GetPhase(ability.FirstStepForTests.RecoveryEndFrame));
             }
             finally
             {
@@ -41,8 +41,8 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void AnimationClip_ExtendsTimelineThroughItsFullDuration()
         {
-            AbilityDefinition ability =
-                ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability =
+                ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip clip = new AnimationClip
             {
                 frameRate = 60f,
@@ -58,12 +58,12 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             try
             {
                 ability.SetAbilityIdForTests("test.full-animation");
-                ability.SetAnimationClipsForTests(clip, null);
-                ability.ConfigureActionWindowsForTests(29, 36, 68);
+                ability.FirstStepForTests.SetAnimationClipForTests(clip);
+                ability.FirstStepForTests.ConfigureActionWindowsForTests(29, 36, 68);
 
-                Assert.AreEqual(150, ability.AnimationFrameCount);
-                Assert.AreEqual(150, ability.RecoveryEndFrame);
-                Assert.AreEqual(2.5f, ability.Duration, 0.0001f);
+                Assert.AreEqual(150, ability.FirstStepForTests.AnimationFrameCount);
+                Assert.AreEqual(150, ability.FirstStepForTests.RecoveryEndFrame);
+                Assert.AreEqual(2.5f, ability.FirstStepForTests.Duration, 0.0001f);
                 Assert.IsTrue(ability.TryValidate(out string error), error);
             }
             finally
@@ -76,8 +76,8 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void ManualEndFrame_CanExtendPastAnimation()
         {
-            AbilityDefinition ability =
-                ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability =
+                ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip clip = new AnimationClip
             {
                 frameRate = 60f,
@@ -92,10 +92,10 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
 
             try
             {
-                ability.SetAnimationClipsForTests(clip, null);
+                ability.FirstStepForTests.SetAnimationClipForTests(clip);
 
-                Assert.AreEqual(30, ability.AnimationFrameCount);
-                Assert.AreEqual(60, ability.RecoveryEndFrame);
+                Assert.AreEqual(30, ability.FirstStepForTests.AnimationFrameCount);
+                Assert.AreEqual(60, ability.FirstStepForTests.RecoveryEndFrame);
             }
             finally
             {
@@ -107,7 +107,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void NullParryEffect_FailsValidation()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
                 ability.SetAbilityIdForTests("test.parry");
@@ -122,15 +122,68 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void DefaultCancelMask_AllowsEveryReason()
+        public void DefaultCancelPolicy_AcceptsAnyTag()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
-                foreach (AbilityCancelReason reason in System.Enum.GetValues(typeof(AbilityCancelReason)))
-                {
-                    Assert.IsTrue(ability.CanBeCancelledBy(reason), reason.ToString());
-                }
+                Assert.IsTrue(ability.CanBeCancelledBy(CommonGameplayTags.CancelManual));
+                Assert.IsTrue(ability.CanBeCancelledBy(new GameplayTag("Cancel.Anything")));
+                Assert.IsTrue(ability.CanBeCancelledBy(default));
+            }
+            finally
+            {
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
+        public void ListedCancelTags_AcceptOnlyThemselves()
+        {
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            try
+            {
+                ability.SetCancellationForTests(
+                    AbilityCancelPolicy.OnlyListedTags,
+                    new GameplayTag("Cancel.Death"));
+
+                Assert.IsTrue(ability.CanBeCancelledBy(new GameplayTag("Cancel.Death")));
+                Assert.IsFalse(ability.CanBeCancelledBy(CommonGameplayTags.CancelManual));
+                Assert.IsFalse(ability.CanBeCancelledBy(default));
+            }
+            finally
+            {
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
+        public void CancelPolicyNothing_RefusesEveryTag()
+        {
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            try
+            {
+                ability.SetCancellationForTests(AbilityCancelPolicy.Nothing);
+
+                Assert.IsFalse(ability.CanBeCancelledBy(CommonGameplayTags.CancelManual));
+            }
+            finally
+            {
+                Object.DestroyImmediate(ability);
+            }
+        }
+
+        [Test]
+        public void ListedCancelPolicyWithoutTags_FailsValidation()
+        {
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            try
+            {
+                ability.SetAbilityIdForTests("test.cancel.empty");
+                ability.SetCancellationForTests(AbilityCancelPolicy.OnlyListedTags);
+
+                Assert.IsFalse(ability.TryValidate(out string error));
+                StringAssert.Contains("Only Listed Tags", error);
             }
             finally
             {

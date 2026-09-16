@@ -6,35 +6,17 @@ using UnityEngine.Serialization;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
-    [Serializable]
-    public sealed class AbilityInputBinding
-    {
-        [SerializeField] private InputActionReference action;
-        [SerializeField] private AbilityDefinition ability;
-
-        public InputActionReference Action => action;
-        public AbilityDefinition Ability => ability;
-    }
-
-    [Serializable]
-    public sealed class AbilityNamedInputBinding
-    {
-        [SerializeField] private string actionName;
-        [SerializeField] private AbilityDefinition ability;
-        [SerializeField] private AbilitySequenceDefinition sequence;
-
-        public string ActionName => actionName ?? string.Empty;
-        public AbilityDefinition Ability => ability;
-        public AbilitySequenceDefinition Sequence => sequence;
-    }
-
+    /// <summary>
+    /// Turns Input System actions into activations, reading one <see
+    /// cref="AbilityInputMap"/>. The only place the package touches input, and
+    /// it lives in its own assembly.
+    /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(AbilitySystem))]
     public sealed class AbilityInputRouter : MonoBehaviour
     {
-        [SerializeField] private AbilityInputBinding[] bindings = { };
-        [SerializeField] private InputActionAsset inputActionAsset;
-        [SerializeField] private AbilityNamedInputBinding[] namedBindings = { };
+        [Tooltip("Which inputs activate which abilities. An asset, so a character swaps its controls the way it swaps its loadout.")]
+        [SerializeField] private AbilityInputMap inputMap;
         [SerializeField] private Transform explicitTarget;
         [SerializeField, FormerlySerializedAs("findEnemyTargetWhenMissing")]
         private bool findFallbackTargetWhenMissing = true;
@@ -43,9 +25,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private AbilitySystem abilitySystem;
         private readonly List<InputAction> subscribedActions = new();
-        private readonly Dictionary<InputAction, AbilityNamedInputBinding> namedLookup = new();
+        private readonly Dictionary<InputAction, AbilityInputEntry> boundActions = new();
+        /// <summary>
+        /// When each ability waiting on a held input was pressed. Only abilities
+        /// whose policy is On Hold or On Release ever appear here, so an On Press
+        /// binding costs nothing extra.
+        /// </summary>
+        private readonly Dictionary<AbilityDefinition, float> heldSince = new();
+        private readonly List<AbilityDefinition> expiredHolds = new();
         private AbilityDefinition bufferedAbility;
-        private AbilitySequenceDefinition bufferedSequence;
         private AbilityContext bufferedContext;
         private float bufferExpiry;
         private bool hasBufferedInput;
@@ -66,61 +54,132 @@ namespace Fofuxo.GameplayAbilitySystem
         public static Func<GameObject> GlobalFallbackTargetResolver { get; set; }
 
         /// <summary>
-        /// Fires for named bindings with neither ability nor sequence: the
-        /// router owns the keybind (enable + performed) while the game owner
-        /// keeps its activation logic (combos, buffers, guards). This keeps
-        /// every combat keybind in one component. The string is the binding's
-        /// action name.
+        /// Fires for a map entry with no ability attached: the router owns the
+        /// keybind (enable + performed) while the game owner keeps its own
+        /// reaction — a combo it drives itself, a guard, a menu. That is what
+        /// keeps every combat keybind in one asset even when what it does is not
+        /// an ability. The string is the action name from the map.
         /// </summary>
         public event Action<string> ForwardedInput;
+
+        /// <summary>
+        /// Where the hold policies read the clock. EditMode has no advancing
+        /// <c>Time.time</c>, so the tests drive it from here; nothing else
+        /// should assign it.
+        /// </summary>
+        internal Func<float> TimeSource { get; set; }
+
+        private float Now => TimeSource?.Invoke() ?? Time.time;
 
         private void Awake()
         {
             abilitySystem = GetComponent<AbilitySystem>();
         }
 
+        /// <summary>
+        /// Reports that the input bound to <paramref name="ability"/> went down.
+        /// An On Press ability activates here; On Hold and On Release start
+        /// their timer instead.
+        ///
+        /// Public because the router is not the only input owner: a game that
+        /// reads its own devices drives the same policies through this pair
+        /// rather than reimplementing them.
+        /// </summary>
+        /// <returns>True when the press activated the ability.</returns>
+        public bool NotifyInputPressed(AbilityDefinition ability)
+        {
+            if (ability == null || abilitySystem == null)
+            {
+                return false;
+            }
+
+            // Tasks waiting on this edge hear it whatever the activation policy
+            // does with it, so a step can wait for a press that activates
+            // nothing — and so the wait tasks and the policies never disagree
+            // about what a press was.
+            abilitySystem.NotifyAbilityInput(AbilityInputEdge.Pressed, ability);
+            if (ability.ActivationInputPolicy == AbilityActivationInputPolicy.OnPress)
+            {
+                TryActivateBinding(ability);
+                return abilitySystem.ActiveAbility == ability;
+            }
+
+            heldSince[ability] = Now;
+            return false;
+        }
+
+        /// <summary>
+        /// Reports that the input bound to <paramref name="ability"/> came back
+        /// up. An On Release ability activates here when it was held for at
+        /// least its hold duration; a shorter press activates nothing.
+        /// </summary>
+        /// <returns>True when the release activated the ability.</returns>
+        public bool NotifyInputReleased(AbilityDefinition ability)
+        {
+            if (ability == null || abilitySystem == null)
+            {
+                return false;
+            }
+
+            abilitySystem.NotifyAbilityInput(AbilityInputEdge.Released, ability);
+            if (!heldSince.TryGetValue(ability, out float pressedAt))
+            {
+                return false;
+            }
+
+            heldSince.Remove(ability);
+            if (ability.ActivationInputPolicy != AbilityActivationInputPolicy.OnRelease ||
+                Now - pressedAt < ability.ActivationHoldDuration)
+            {
+                return false;
+            }
+
+            TryActivateBinding(ability);
+            return abilitySystem.ActiveAbility == ability;
+        }
+
         private void OnEnable()
         {
-            foreach (AbilityInputBinding binding in bindings)
+            if (inputMap == null)
             {
-                InputAction action = binding?.Action?.action;
+                return;
+            }
+
+            IReadOnlyList<AbilityInputEntry> entries = inputMap.Entries;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                AbilityInputEntry entry = entries[i];
+                InputAction action = inputMap.FindAction(entry.ActionName);
                 if (action == null)
                 {
+                    Debug.LogWarning(
+                        $"AbilityInputRouter on '{name}' could not find action " +
+                        $"'{entry.ActionName}' in '{inputMap.name}'. It was renamed or " +
+                        "removed, and nothing is bound to it.",
+                        this);
                     continue;
                 }
 
                 // No other component enables the shared input asset, so the router
                 // enables every action it subscribes to. Enabling is idempotent.
                 action.Enable();
-                action.performed += OnAbilityInputPerformed;
-                subscribedActions.Add(action);
+                Subscribe(action);
+                boundActions[action] = entry;
             }
+        }
 
-            if (inputActionAsset != null)
-            {
-                foreach (AbilityNamedInputBinding binding in namedBindings)
-                {
-                    if (binding == null || string.IsNullOrWhiteSpace(binding.ActionName))
-                    {
-                        continue;
-                    }
-
-                    InputAction action = inputActionAsset.FindAction(binding.ActionName, false);
-                    if (action == null)
-                    {
-                        Debug.LogWarning(
-                            $"AbilityInputRouter on '{name}' could not find action " +
-                            $"'{binding.ActionName}'. Check the input asset and the binding name.",
-                            this);
-                        continue;
-                    }
-
-                    action.Enable();
-                    action.performed += OnAbilityInputPerformed;
-                    subscribedActions.Add(action);
-                    namedLookup[action] = binding;
-                }
-            }
+        /// <summary>
+        /// Every action is watched on all three edges. Which edge activates is
+        /// the ability's own <see cref="AbilityActivationInputPolicy"/>, decided
+        /// per press rather than per subscription, so one action bound to
+        /// several abilities can mix policies.
+        /// </summary>
+        private void Subscribe(InputAction action)
+        {
+            action.started += OnAbilityInputStarted;
+            action.performed += OnAbilityInputPerformed;
+            action.canceled += OnAbilityInputCanceled;
+            subscribedActions.Add(action);
         }
 
         private void OnDisable()
@@ -129,17 +188,23 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 if (action != null)
                 {
+                    action.started -= OnAbilityInputStarted;
                     action.performed -= OnAbilityInputPerformed;
+                    action.canceled -= OnAbilityInputCanceled;
                 }
             }
 
             subscribedActions.Clear();
-            namedLookup.Clear();
+            boundActions.Clear();
+            heldSince.Clear();
+            expiredHolds.Clear();
             ClearBufferedInput();
         }
 
         private void Update()
         {
+            TickHeldInputs();
+
             if (!hasBufferedInput || abilitySystem == null)
             {
                 return;
@@ -151,16 +216,6 @@ namespace Fofuxo.GameplayAbilitySystem
                 return;
             }
 
-            if (bufferedSequence != null)
-            {
-                if (abilitySystem.TryActivateSequence(bufferedSequence, bufferedContext))
-                {
-                    ClearBufferedInput();
-                }
-
-                return;
-            }
-
             if (bufferedAbility != null &&
                 abilitySystem.TryActivate(bufferedAbility, bufferedContext))
             {
@@ -168,55 +223,141 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
-        private void OnAbilityInputPerformed(InputAction.CallbackContext inputContext)
+        /// <summary>
+        /// Activates an On Hold ability the moment its hold duration elapses,
+        /// rather than waiting for the release: holding is the input, so the
+        /// player should not have to let go to see it happen.
+        /// </summary>
+        internal void TickHeldInputs()
         {
-            if (abilitySystem == null)
+            if (heldSince.Count == 0 || abilitySystem == null)
             {
                 return;
             }
 
-            foreach (AbilityInputBinding binding in bindings)
+            float now = Now;
+            expiredHolds.Clear();
+            foreach (KeyValuePair<AbilityDefinition, float> entry in heldSince)
             {
-                if (binding?.Action?.action != inputContext.action || binding.Ability == null)
+                AbilityDefinition ability = entry.Key;
+                if (ability.ActivationInputPolicy != AbilityActivationInputPolicy.OnHold ||
+                    now - entry.Value < ability.ActivationHoldDuration)
                 {
                     continue;
                 }
 
-                TryActivateBinding(binding.Ability, null);
-                return;
+                expiredHolds.Add(ability);
             }
 
-            if (namedLookup.TryGetValue(inputContext.action, out AbilityNamedInputBinding namedBinding) &&
-                namedBinding != null)
+            for (int i = 0; i < expiredHolds.Count; i++)
             {
-                if (namedBinding.Ability == null && namedBinding.Sequence == null)
-                {
-                    ForwardedInput?.Invoke(namedBinding.ActionName);
-                    return;
-                }
+                // Dropped before activating: an ability that fails here should
+                // not retry on the next frame off the same press.
+                heldSince.Remove(expiredHolds[i]);
+                TryActivateBinding(expiredHolds[i]);
+            }
 
-                TryActivateBinding(namedBinding.Ability, namedBinding.Sequence);
+            expiredHolds.Clear();
+        }
+
+        private void OnAbilityInputStarted(InputAction.CallbackContext inputContext)
+        {
+            // Only the waiting policies need the down edge. An On Press ability
+            // activates from performed, as it always has, so a binding with an
+            // interaction attached still fires where the interaction says.
+            if (TryResolveBinding(inputContext.action, out AbilityDefinition ability, out _) &&
+                ability != null &&
+                ability.ActivationInputPolicy != AbilityActivationInputPolicy.OnPress)
+            {
+                NotifyInputPressed(ability);
             }
         }
 
-        private void TryActivateBinding(AbilityDefinition ability, AbilitySequenceDefinition sequence)
+        private void OnAbilityInputCanceled(InputAction.CallbackContext inputContext)
         {
+            if (TryResolveBinding(inputContext.action, out AbilityDefinition ability, out _) &&
+                ability != null)
+            {
+                NotifyInputReleased(ability);
+            }
+        }
+
+        private void OnAbilityInputPerformed(InputAction.CallbackContext inputContext)
+        {
+            if (abilitySystem == null ||
+                !TryResolveBinding(
+                    inputContext.action, out AbilityDefinition ability, out string actionName))
+            {
+                return;
+            }
+
+            if (ability == null)
+            {
+                ForwardedInput?.Invoke(actionName);
+                return;
+            }
+
+            // On Hold and On Release own their own edges. A button action also
+            // reports performed on the press, and acting on it here would make
+            // every policy behave like On Press.
+            if (ability.ActivationInputPolicy != AbilityActivationInputPolicy.OnPress)
+            {
+                return;
+            }
+
+            TryActivateBinding(ability);
+        }
+
+        /// <summary>
+        /// Finds what an action is bound to. An explicit binding wins over a
+        /// named one, matching the order the router has always resolved in.
+        /// </summary>
+        /// <param name="ability">
+        /// Null for a named binding with no ability, which the router forwards
+        /// to the game owner instead of activating.
+        /// </param>
+        private bool TryResolveBinding(
+            InputAction action, out AbilityDefinition ability, out string actionName)
+        {
+            if (boundActions.TryGetValue(action, out AbilityInputEntry entry))
+            {
+                ability = entry.Ability;
+                actionName = entry.ActionName;
+                return true;
+            }
+
+            ability = null;
+            actionName = string.Empty;
+            return false;
+        }
+
+        private void TryActivateBinding(AbilityDefinition ability)
+        {
+            if (ability == null)
+            {
+                return;
+            }
+
+            // Pressing the same button again while a manual combo is running is
+            // a request for its next step, not a new activation.
+            if (abilitySystem.ActiveAbility == ability &&
+                ability is TimelineAbilityDefinition timeline &&
+                timeline.StepAdvancement == AbilityStepAdvancement.Manual &&
+                abilitySystem.TryQueueStepAdvance())
+            {
+                ClearBufferedInput();
+                return;
+            }
+
             // Targetless abilities (rolls, self novas) declare RequiresTarget
             // false precisely so no target is resolved for them: a fallback
             // target would only subject them to a meaningless range gate.
-            // Sequences keep the fallback because their steps may need one.
-            GameObject target = sequence != null ||
-                (ability != null && ability.RequiresTarget)
-                ? ResolveTarget()
-                : null;
+            GameObject target = ability.RequiresTarget ? ResolveTarget() : null;
             AbilityContext context = AbilityContext.FromTarget(gameObject, target);
-            bool activated = sequence != null
-                ? abilitySystem.TryActivateSequence(sequence, context)
-                : ability != null && abilitySystem.TryActivate(ability, context);
-            if (!activated && bufferWindow > 0f && (sequence != null || ability != null))
+            bool activated = abilitySystem.TryActivate(ability, context);
+            if (!activated && bufferWindow > 0f)
             {
                 bufferedAbility = ability;
-                bufferedSequence = sequence;
                 bufferedContext = context;
                 bufferExpiry = Time.time + bufferWindow;
                 hasBufferedInput = true;
@@ -230,7 +371,6 @@ namespace Fofuxo.GameplayAbilitySystem
         private void ClearBufferedInput()
         {
             bufferedAbility = null;
-            bufferedSequence = null;
             bufferedContext = default;
             bufferExpiry = 0f;
             hasBufferedInput = false;

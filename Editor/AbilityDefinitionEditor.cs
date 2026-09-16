@@ -1,317 +1,742 @@
+using System.Collections.Generic;
 using Fofuxo.GameplayAbilitySystem;
 using UnityEditor;
 using UnityEngine;
 
+/// <summary>
+/// Inspector for an ability and its steps. The step list is the centre of the
+/// UI because that is where a combo is authored now: one asset, one step per
+/// swing, each with its own clip and frame windows.
+///
+/// An ability with no steps is a normal ability, not an unfinished one — its
+/// work is code in a derived type, and everything below the timeline still
+/// applies to it. What that type adds appears in its own section, under the
+/// name of the class that declares it.
+/// </summary>
 [CustomEditor(typeof(AbilityDefinition), true)]
 public sealed class AbilityDefinitionEditor : Editor
 {
-    private bool showDamageBox = true;
-    private bool showAdvanced;
+    /// <summary>
+    /// Every property this Inspector lays out by hand. What is left over is
+    /// drawn by <see cref="DrawUnhandledProperties"/>, so a derived ability's
+    /// own fields are editable without touching this file, and a field added to
+    /// the base class can never go silently invisible.
+    /// </summary>
+    private readonly HashSet<string> handledProperties = new();
 
+    private bool embeddedEffectsExpanded = true;
     private Editor previewClipEditor;
     private AnimationClip previewClipEditorTarget;
+    private readonly AbilityTimelineView timelineView = new();
 
     private void OnEnable()
     {
         UpdatePreviewClipEditor();
     }
 
+    /// <summary>
+    /// Fires when the Inspector stops showing this ability, which is what
+    /// selecting another asset does. Unsaved edits survive in memory but are
+    /// discarded by a domain reload, so leaving them behind silently is the one
+    /// way to lose authoring work here.
+    /// </summary>
     private void OnDisable()
     {
         DestroyPreviewClipEditor();
+        WarnIfLeavingUnsavedChanges();
+    }
+
+    private void WarnIfLeavingUnsavedChanges()
+    {
+        AbilityDefinition ability = target as AbilityDefinition;
+        if (ability == null)
+        {
+            return;
+        }
+
+        string assetPath = AssetDatabase.GetAssetPath(ability);
+        if (string.IsNullOrEmpty(assetPath) || !HasUnsavedChanges(ability, assetPath))
+        {
+            return;
+        }
+
+        Debug.LogWarning(
+            $"'{ability.name}' still has unsaved changes. Select it again and " +
+            "press Save Ability, or press Ctrl+S, before a domain reload discards them.",
+            ability);
     }
 
     public override void OnInspectorGUI()
     {
-        serializedObject.Update();
-
         AbilityDefinition ability = (AbilityDefinition)target;
-        bool hasDamageTrigger = TryFindDamageTrigger(out SerializedProperty damageTrigger);
-        if (hasDamageTrigger)
-        {
-            DrawAttackInspector(ability, damageTrigger);
-        }
-        else
-        {
-            DrawGenericInspector();
-        }
-
-        serializedObject.ApplyModifiedProperties();
-        DrawResolvedTimeline(ability);
-        DrawValidation(ability);
-
-        if (!hasDamageTrigger)
-        {
-            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(AssetDatabase.GetAssetPath(ability))))
-            {
-                if (GUILayout.Button("Add Embedded Box Damage Effect"))
-                {
-                    AddEmbeddedBoxEffect(ability);
-                }
-            }
-        }
+        DrawSaveBar(ability);
+        DrawNamingViolations(ability);
 
         serializedObject.Update();
-        DrawPreviewConfiguration();
-        if (serializedObject.ApplyModifiedProperties())
+
+        DrawProperty("abilityId", "Ability Id");
+
+        if (ability is TimelineAbilityDefinition timelineAbility)
         {
-            UpdatePreviewClipEditor();
+            EditorGUILayout.Space();
+            DrawSteps(timelineAbility);
+
+            EditorGUILayout.Space();
+            timelineView.Draw(serializedObject, timelineAbility);
+        }
+
+        EditorGUILayout.Space();
+        DrawProperty("requiresTarget");
+        DrawProperty("minimumRange");
+        DrawProperty("maximumRange");
+        DrawProperty("maximumFacingAngle");
+        DrawProperty("targetAssist", "Target Assist");
+
+        EditorGUILayout.Space();
+        DrawProperty("cooldown");
+        DrawProperty("cooldownStartPolicy");
+        DrawCancellation(ability);
+        DrawProperty("lockMovementDuringAbility");
+        DrawActivationInput(ability);
+        DrawProperty("activationTriggers", "Activation Triggers", true);
+
+        EditorGUILayout.Space();
+        DrawExclusionGroup(ability);
+
+        EditorGUILayout.Space();
+        DrawProperty("costs", null, true);
+        DrawProperty("maxCharges");
+        DrawProperty("chargeRestoreTime");
+
+        EditorGUILayout.Space();
+        DrawProperty("requiredTags", null, true);
+        DrawProperty("blockedTags", null, true);
+        DrawProperty("grantedTags", null, true);
+        DrawProperty("onParryEffects", null, true);
+        DrawProperty("baseAiWeight");
+
+        DrawUnhandledProperties();
+        serializedObject.ApplyModifiedProperties();
+
+        EditorGUILayout.Space();
+        DrawValidation(ability);
+        DrawEmbeddedEffects(ability);
+        DrawPreviewSection(ability);
+    }
+
+    /// <summary>
+    /// The tag list only means something under Only Listed Tags, so it is the
+    /// one field here that appears with the policy rather than beside it.
+    /// </summary>
+    private void DrawCancellation(AbilityDefinition ability)
+    {
+        MarkHandled("cancelledByTags");
+        DrawProperty("cancelPolicy", "Cancel Policy");
+        if (ability.CancelPolicy == AbilityCancelPolicy.OnlyListedTags)
+        {
+            DrawProperty("cancelledByTags", "Cancelled By Tags", true);
         }
     }
 
-    private void DrawGenericInspector()
+    /// <summary>
+    /// The hold duration only means something to a policy that waits for one,
+    /// so it appears with the policy rather than beside it.
+    /// </summary>
+    private void DrawActivationInput(AbilityDefinition ability)
     {
-        Editor.DrawPropertiesExcluding(
-            serializedObject,
-            "m_Script",
-            "animatorStateName",
-            "previewAnimationClip");
+        MarkHandled("activationHoldDuration");
+        DrawProperty("activationInputPolicy", "Activation Input");
+        if (ability.ActivationInputPolicy != AbilityActivationInputPolicy.OnPress)
+        {
+            DrawProperty("activationHoldDuration", "Hold Duration");
+        }
     }
 
-    private void DrawAttackInspector(
-        AbilityDefinition ability,
-        SerializedProperty damageTrigger)
+    /// <summary>
+    /// The group tag is only read by the policies scoped to a group, and leaving
+    /// it empty under one of those is a validation error — so it is drawn where
+    /// the policy that needs it is chosen.
+    /// </summary>
+    private void DrawExclusionGroup(AbilityDefinition ability)
     {
-        EditorGUILayout.LabelField("Identity", EditorStyles.boldLabel);
-        DrawProperty("abilityId");
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Animation", EditorStyles.boldLabel);
-        DrawProperty("animationClip");
-        DrawProperty("animationBlendDuration");
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Combat Frames", EditorStyles.boldLabel);
-        SerializedProperty damageFrame = damageTrigger.FindPropertyRelative("frame");
-        EditorGUI.BeginChangeCheck();
-        EditorGUILayout.PropertyField(
-            damageFrame,
-            new GUIContent(
-                "Damage Frame",
-                "The oriented damage query executes once on this 1-based frame."));
-        if (EditorGUI.EndChangeCheck())
+        MarkHandled("groupTag");
+        DrawProperty("groupExclusionPolicy", "Exclusion Policy");
+        if (!ability.UsesGroupScopedExclusion)
         {
-            int frame = Mathf.Max(1, damageFrame.intValue);
-            damageFrame.intValue = frame;
-            serializedObject.FindProperty("startupEndFrame").intValue = frame - 1;
-            serializedObject.FindProperty("activeEndFrame").intValue = frame;
+            EditorGUILayout.HelpBox(
+                ability.GroupExclusionPolicy == AbilityGroupExclusionPolicy.CancelAnyActive
+                    ? "Cancel Any Active: this ability interrupts whatever is " +
+                      "running and takes its place, unless that ability refuses " +
+                      "to be cancelled."
+                    : "Block While Any Active: one ability at a time, which is " +
+                      "how every ability behaves until it opts out here.",
+                MessageType.Info);
+            return;
         }
 
-        DrawProperty("movementUnlockFrame", "Movement Unlock Frame");
-        DrawProperty("comboContinuationFrame", "Combo Continue Frame");
-        DrawProperty("comboInputEndFrame", "Combo Input End Frame");
+        DrawProperty("groupTag", "Group Tag");
         EditorGUILayout.HelpBox(
-            "An Attack press before Combo Continue Frame is buffered. It starts " +
-            "the next step when that frame arrives, unless pressed after Combo " +
-            "Input End Frame.",
+            ability.GroupExclusionPolicy ==
+            AbilityGroupExclusionPolicy.BlockWhileSameGroupActive
+                ? "Only an ability in the same group blocks this one. Abilities " +
+                  "in other groups keep running alongside it."
+                : "This ability cancels the running abilities in its group and " +
+                  "takes their place. Abilities in other groups are left alone.",
             MessageType.Info);
+    }
 
-        SerializedProperty effectReference = damageTrigger.FindPropertyRelative("effect");
-        AbilityEffectDefinition effect =
-            effectReference.objectReferenceValue as AbilityEffectDefinition;
-        EditorGUILayout.Space();
-        string damageLabel = effect is BoxDamageEffectDefinition
-            ? "Damage Box"
-            : "Damage Query";
-        showDamageBox = EditorGUILayout.Foldout(showDamageBox, damageLabel, true);
-        if (showDamageBox)
+    private void DrawSteps(TimelineAbilityDefinition ability)
+    {
+        MarkHandled(
+            "steps",
+            "stepAdvancement",
+            "stepAdvanceEventTag",
+            "stepTimeoutPolicy");
+        SerializedProperty steps = serializedObject.FindProperty("steps");
+        EditorGUILayout.PropertyField(
+            steps,
+            new GUIContent(
+                "Steps",
+                "Optional. One entry per swing, several for a combo. None is an " +
+                "ability with no timeline, whose work is code in a derived type " +
+                "and which runs until something ends it."),
+            true);
+
+        if (steps.arraySize > 1)
         {
-            using (new EditorGUI.IndentLevelScope())
+            DrawProperty("stepAdvancement", "Advancement");
+            EditorGUILayout.HelpBox(DescribeAdvancement(ability), MessageType.Info);
+
+            if (ability.StepAdvancement == AbilityStepAdvancement.OnEvent)
             {
-                EditorGUILayout.PropertyField(effectReference, new GUIContent("Effect"));
-                DrawEmbeddedEffect(effect);
+                DrawProperty("stepAdvanceEventTag", "Step Advance Event");
+            }
+
+            if (ability.WaitsToAdvance)
+            {
+                DrawProperty("stepTimeoutPolicy", "On Timeout");
             }
         }
 
-        EditorGUILayout.Space();
-        showAdvanced = EditorGUILayout.Foldout(showAdvanced, "Advanced", true);
-        if (showAdvanced)
+        // Nothing to hang an effect on without a step, and nothing to write it
+        // into without an asset on disk.
+        using (new EditorGUI.DisabledScope(
+            ability.StepCount == 0 ||
+            string.IsNullOrEmpty(AssetDatabase.GetAssetPath(ability))))
         {
-            using (new EditorGUI.IndentLevelScope())
+            if (GUILayout.Button("Add Embedded Damage Effect To Last Step"))
             {
-                DrawProperty("cooldown");
-                DrawProperty("cooldownStartPolicy");
-                DrawProperty("recoveryEndFrame", "Minimum Ability End Frame");
-                DrawProperty("costs", includeChildren: true);
-                DrawProperty("maxCharges");
-                DrawProperty("chargeRestoreTime");
-                DrawProperty("allowedCancellation");
-                DrawProperty("lockMovementDuringAbility");
-                DrawProperty("requiredTags", includeChildren: true);
-                DrawProperty("blockedTags", includeChildren: true);
-                DrawProperty("grantedTags", includeChildren: true);
-                DrawProperty("effectTriggers", includeChildren: true);
-                DrawProperty("cueTriggers", includeChildren: true);
-                DrawProperty("baseAiWeight");
+                AddEmbeddedDamageEffect(ability);
             }
         }
     }
 
-    private void DrawPreviewConfiguration()
+    private static string DescribeAdvancement(TimelineAbilityDefinition ability)
     {
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
-        DrawProperty("previewAnimationClip", "Preview Clip");
+        switch (ability.StepAdvancement)
+        {
+            case AbilityStepAdvancement.Manual:
+                return "Manual: each step waits for another input inside its Combo " +
+                       "Continue / Combo Input End window, plus any Late Grace " +
+                       "Frames the step allows.";
+            case AbilityStepAdvancement.OnEvent:
+                return "On Event: each step waits for a gameplay event carrying " +
+                       "the Step Advance Event tag. The step's combo window still " +
+                       "decides when the advance lands.";
+            case AbilityStepAdvancement.OnCondition:
+                return "On Condition: the ability's Can Advance Step override, or " +
+                       "the system's Step Advance Condition delegate, is polled " +
+                       "while the step's combo window is open.";
+            default:
+                return "Automatic: every step chains straight into the next one.";
+        }
+    }
+
+    /// <summary>
+    /// Fields the layout owns but does not always show — a step list of one hides
+    /// its advancement mode, and the cancel tags only appear under their policy.
+    /// They stay out of the leftover section on the passes that skip them.
+    /// </summary>
+    private void MarkHandled(params string[] propertyNames)
+    {
+        for (int i = 0; i < propertyNames.Length; i++)
+        {
+            handledProperties.Add(propertyNames[i]);
+        }
+    }
+
+    /// <summary>
+    /// Draws whatever the hand-written layout above did not: the fields of a
+    /// derived ability type, and any base field that was added without a line
+    /// here. One section per class that declares fields, base first, so an
+    /// ability three levels deep reads as what it inherits, then what its parent
+    /// adds, then what it adds — instead of one undifferentiated pile under the
+    /// name of the concrete type, which is what a single heading gave.
+    /// </summary>
+    private void DrawUnhandledProperties()
+    {
+        // The preview pane at the bottom owns this one and draws it later.
+        MarkHandled("previewAnimationClip");
+
+        Dictionary<System.Type, List<SerializedProperty>> byDeclaringType = new();
+        SerializedProperty iterator = serializedObject.GetIterator();
+        bool enterChildren = true;
+        while (iterator.NextVisible(enterChildren))
+        {
+            enterChildren = false;
+            if (iterator.propertyPath == "m_Script" ||
+                handledProperties.Contains(iterator.propertyPath))
+            {
+                continue;
+            }
+
+            System.Type declaring = ResolveDeclaringType(
+                target.GetType(), iterator.propertyPath);
+            if (!byDeclaringType.TryGetValue(declaring, out List<SerializedProperty> group))
+            {
+                group = new List<SerializedProperty>();
+                byDeclaringType.Add(declaring, group);
+            }
+
+            group.Add(iterator.Copy());
+        }
+
+        foreach (System.Type type in InheritanceChain(target.GetType()))
+        {
+            if (!byDeclaringType.TryGetValue(type, out List<SerializedProperty> group))
+            {
+                continue;
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(
+                new GUIContent(
+                    ObjectNames.NicifyVariableName(type.Name),
+                    $"Declared by {type.FullName}."),
+                EditorStyles.boldLabel);
+            for (int i = 0; i < group.Count; i++)
+            {
+                EditorGUILayout.PropertyField(group[i], true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The class that declares the serialized field behind a property, which is
+    /// the only thing that says which level of the hierarchy a field belongs to.
+    /// Unity's own iterator flattens the whole chain into one list.
+    /// </summary>
+    private static System.Type ResolveDeclaringType(
+        System.Type concreteType, string fieldName)
+    {
+        const System.Reflection.BindingFlags Flags =
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.DeclaredOnly;
+
+        for (System.Type type = concreteType; type != null; type = type.BaseType)
+        {
+            if (type.GetField(fieldName, Flags) != null)
+            {
+                return type;
+            }
+        }
+
+        // A property with no field behind it — an array element path, or a
+        // Unity-internal one. It belongs to the concrete type as far as the
+        // author is concerned.
+        return concreteType;
+    }
+
+    /// <summary>
+    /// The ability's hierarchy from <see cref="AbilityDefinition"/> down to the
+    /// concrete type. Base first, because that is the order an author reads it
+    /// in: what every ability has, then what this kind of ability adds.
+    /// </summary>
+    private static List<System.Type> InheritanceChain(System.Type concreteType)
+    {
+        List<System.Type> chain = new();
+        for (System.Type type = concreteType;
+             type != null && typeof(AbilityDefinition).IsAssignableFrom(type);
+             type = type.BaseType)
+        {
+            chain.Add(type);
+        }
+
+        chain.Reverse();
+        return chain;
     }
 
     private void DrawProperty(
-        string propertyName,
-        string displayName = null,
-        bool includeChildren = false)
+        string propertyName, string displayName = null, bool includeChildren = false)
     {
+        handledProperties.Add(propertyName);
         SerializedProperty property = serializedObject.FindProperty(propertyName);
         if (property == null)
         {
             return;
         }
 
-        GUIContent label = string.IsNullOrEmpty(displayName)
-            ? null
-            : new GUIContent(displayName);
-        if (label == null)
+        if (string.IsNullOrEmpty(displayName))
         {
             EditorGUILayout.PropertyField(property, includeChildren);
         }
         else
         {
-            EditorGUILayout.PropertyField(property, label, includeChildren);
+            EditorGUILayout.PropertyField(property, new GUIContent(displayName), includeChildren);
         }
     }
 
-    private bool TryFindDamageTrigger(out SerializedProperty damageTrigger)
+    /// <summary>
+    /// Inspector edits only raise a dirty flag. A domain reload -- entering or
+    /// leaving play mode, recompiling, or restarting the Editor -- reloads the
+    /// asset from disk and drops whatever was never written, so the ability
+    /// needs an explicit save that does not depend on saving the scene.
+    /// </summary>
+    private static void DrawSaveBar(AbilityDefinition ability)
     {
-        SerializedProperty triggers = serializedObject.FindProperty("effectTriggers");
-        if (triggers != null)
-        {
-            for (int i = 0; i < triggers.arraySize; i++)
-            {
-                SerializedProperty trigger = triggers.GetArrayElementAtIndex(i);
-                Object effect = trigger.FindPropertyRelative("effect").objectReferenceValue;
-                if (effect is MeleeDamageEffectDefinition ||
-                    effect is BoxDamageEffectDefinition ||
-                    effect is CapsuleDamageEffectDefinition)
-                {
-                    damageTrigger = trigger;
-                    return true;
-                }
-            }
-        }
-
-        damageTrigger = null;
-        return false;
-    }
-
-    private static void DrawEmbeddedEffect(AbilityEffectDefinition effect)
-    {
-        if (effect == null)
+        string assetPath = AssetDatabase.GetAssetPath(ability);
+        if (string.IsNullOrEmpty(assetPath))
         {
             return;
         }
 
-        SerializedObject serializedEffect = new(effect);
-        serializedEffect.Update();
-        SerializedProperty property = serializedEffect.GetIterator();
-        bool enterChildren = true;
-        while (property.NextVisible(enterChildren))
+        bool dirty = HasUnsavedChanges(ability, assetPath);
+
+        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
         {
-            enterChildren = false;
-            if (property.propertyPath == "m_Script")
+            EditorGUILayout.LabelField(
+                dirty ? "Unsaved changes" : "Saved",
+                dirty ? EditorStyles.boldLabel : EditorStyles.label);
+
+            using (new EditorGUI.DisabledScope(!dirty))
             {
-                continue;
+                if (GUILayout.Button("Save Ability", GUILayout.Width(110f)))
+                {
+                    SaveAbility(ability, assetPath);
+                }
+            }
+        }
+
+        if (dirty && EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            EditorGUILayout.HelpBox(
+                "Edited during play mode. Leaving play mode reloads this asset " +
+                "from disk and discards the change unless it is saved first.",
+                MessageType.Warning);
+        }
+    }
+
+    /// <summary>
+    /// Reports the ability's own name and the name of every effect embedded in
+    /// it. The embedded ones have no Inspector of their own, so this is the only
+    /// place they are ever seen.
+    /// </summary>
+    private static void DrawNamingViolations(AbilityDefinition ability)
+    {
+        AssetNamingConvention.DrawViolationBox(ability);
+
+        string assetPath = AssetDatabase.GetAssetPath(ability);
+        if (string.IsNullOrEmpty(assetPath))
+        {
+            return;
+        }
+
+        foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+        {
+            if (embedded != null && embedded != ability)
+            {
+                AssetNamingConvention.DrawViolationBox(embedded);
+            }
+        }
+    }
+
+    private static bool HasUnsavedChanges(AbilityDefinition ability, string assetPath)
+    {
+        if (EditorUtility.IsDirty(ability))
+        {
+            return true;
+        }
+
+        foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+        {
+            if (embedded != null && embedded != ability && EditorUtility.IsDirty(embedded))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Writes the ability and its embedded effects, which live as sub-assets of
+    /// the same file and can be dirty on their own.
+    /// </summary>
+    private static void SaveAbility(AbilityDefinition ability, string assetPath)
+    {
+        EditorUtility.SetDirty(ability);
+        foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+        {
+            if (embedded != null && embedded != ability)
+            {
+                EditorUtility.SetDirty(embedded);
+            }
+        }
+
+        AssetDatabase.SaveAssetIfDirty(ability);
+    }
+
+    private static void DrawValidation(AbilityDefinition ability)
+    {
+        if (ability.TryValidate(out string validationError))
+        {
+            EditorGUILayout.HelpBox("Ability configuration is valid.", MessageType.Info);
+        }
+        else
+        {
+            EditorGUILayout.HelpBox(validationError, MessageType.Error);
+        }
+
+        if (ability.TryGetAuthoringWarning(out string warning))
+        {
+            EditorGUILayout.HelpBox(warning, MessageType.Warning);
+        }
+    }
+
+    /// <summary>
+    /// Embedded effects are sub-assets of this file, so they cannot be edited
+    /// from the object field alone.
+    /// </summary>
+    private void DrawEmbeddedEffects(AbilityDefinition ability)
+    {
+        string assetPath = AssetDatabase.GetAssetPath(ability);
+        if (string.IsNullOrEmpty(assetPath))
+        {
+            return;
+        }
+
+        List<GameplayEffectDefinition> effects = new();
+        foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
+        {
+            if (embedded != null && embedded != ability &&
+                embedded is GameplayEffectDefinition effect)
+            {
+                effects.Add(effect);
+            }
+        }
+
+        if (effects.Count == 0)
+        {
+            return;
+        }
+
+        EditorGUILayout.Space();
+        embeddedEffectsExpanded = EditorGUILayout.Foldout(
+            embeddedEffectsExpanded,
+            $"Embedded Effects ({effects.Count})",
+            true,
+            EditorStyles.foldoutHeader);
+        if (!embeddedEffectsExpanded)
+        {
+            return;
+        }
+
+        using (new EditorGUI.IndentLevelScope())
+        {
+            foreach (GameplayEffectDefinition effect in effects)
+            {
+                DrawEmbeddedEffect(effect);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One embedded effect behind its own foldout.
+    /// </summary>
+    private static void DrawEmbeddedEffect(GameplayEffectDefinition effect)
+    {
+        string key = EmbeddedEffectFoldoutKey(effect);
+        bool wasExpanded = SessionState.GetBool(key, false);
+        bool expanded = EditorGUILayout.Foldout(wasExpanded, effect.name, true);
+        if (expanded != wasExpanded)
+        {
+            SessionState.SetBool(key, expanded);
+        }
+
+        if (!expanded)
+        {
+            return;
+        }
+
+        using (new EditorGUI.IndentLevelScope())
+        {
+            SerializedObject serializedEffect = new(effect);
+            serializedEffect.Update();
+            SerializedProperty property = serializedEffect.GetIterator();
+            bool enterChildren = true;
+            while (property.NextVisible(enterChildren))
+            {
+                enterChildren = false;
+                if (property.propertyPath == "m_Script")
+                {
+                    continue;
+                }
+
+                EditorGUILayout.PropertyField(property, true);
             }
 
-            EditorGUILayout.PropertyField(property, true);
+            if (serializedEffect.ApplyModifiedProperties())
+            {
+                EditorUtility.SetDirty(effect);
+            }
+
+            GameplayEffectDefinitionEditor.DrawValidationBox(effect);
+        }
+    }
+
+    /// <summary>
+    /// Unity's own inspector-expanded flag is keyed by type, not by object, so
+    /// two damage effects embedded in the same ability would share one
+    /// triangle and open together. The local file id is unique inside the
+    /// asset and survives a rename, so key the state on that.
+    /// </summary>
+    private static string EmbeddedEffectFoldoutKey(GameplayEffectDefinition effect)
+    {
+        return AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+            effect, out string guid, out long localId)
+            ? $"Fofuxo.GAS.EmbeddedEffect.{guid}.{localId}"
+            : $"Fofuxo.GAS.EmbeddedEffect.{effect.name}";
+    }
+
+    private static void AddEmbeddedDamageEffect(TimelineAbilityDefinition ability)
+    {
+        SerializedObject serializedAbility = new(ability);
+        SerializedProperty steps = serializedAbility.FindProperty("steps");
+        if (steps.arraySize == 0)
+        {
+            return;
         }
 
-        if (serializedEffect.ApplyModifiedProperties())
+        DamageEffectDefinition effect = CreateInstance<DamageEffectDefinition>();
+        effect.name = $"{ability.name}_Damage";
+        effect.hideFlags = HideFlags.HideInHierarchy;
+        AssetDatabase.AddObjectToAsset(effect, ability);
+
+        SerializedProperty step = steps.GetArrayElementAtIndex(steps.arraySize - 1);
+        SerializedProperty triggers = step.FindPropertyRelative("effectTriggers");
+        int newIndex = triggers.arraySize;
+        triggers.InsertArrayElementAtIndex(newIndex);
+        SerializedProperty trigger = triggers.GetArrayElementAtIndex(newIndex);
+        AbilityStep lastStep = ability.StepAt(ability.StepCount - 1);
+        trigger.FindPropertyRelative("frame").intValue =
+            lastStep == null ? 1 : Mathf.Max(1, lastStep.ActiveEndFrame);
+        trigger.FindPropertyRelative("effect").objectReferenceValue = effect;
+        SerializedProperty level = trigger.FindPropertyRelative("level");
+        if (level != null)
         {
-            EditorUtility.SetDirty(effect);
+            level.intValue = 1;
         }
+        serializedAbility.ApplyModifiedProperties();
+
+        EditorUtility.SetDirty(effect);
+        EditorUtility.SetDirty(ability);
+        AssetDatabase.SaveAssets();
+    }
+
+    // ---------------------------------------------------------------- preview
+
+    /// <summary>
+    /// The ability's single preview clip, at the end of the Inspector next to
+    /// the panel it drives. It is authoring scaffolding, not gameplay data.
+    /// </summary>
+    private void DrawPreviewSection(AbilityDefinition ability)
+    {
+        EditorGUILayout.Space();
+        serializedObject.Update();
+        DrawProperty("previewAnimationClip", "Preview Animation Clip");
+        serializedObject.ApplyModifiedProperties();
+
+        UpdatePreviewClipEditor();
+
+        if (ability.PreviewClip == null)
+        {
+            EditorGUILayout.HelpBox(
+                "No Preview Animation Clip, so the preview panel is hidden. "
+                + "Assign any clip to inspect it here — it does not have to be "
+                + "one this ability plays"
+                + (ability is TimelineAbilityDefinition
+                    ? ", and Preview This Step inside a step borrows that step's clip."
+                    : "."),
+                MessageType.Info);
+        }
+    }
+
+    private AnimationClip ResolvePreviewClip()
+    {
+        return targets.Length == 1 && target is AbilityDefinition ability
+            ? ability.PreviewClip
+            : null;
     }
 
     public override bool HasPreviewGUI()
     {
-        UpdatePreviewClipEditor();
         return previewClipEditor != null && previewClipEditor.HasPreviewGUI();
     }
 
     public override GUIContent GetPreviewTitle()
     {
-        UpdatePreviewClipEditor();
-        return previewClipEditor != null
-            ? previewClipEditor.GetPreviewTitle()
-            : base.GetPreviewTitle();
+        AnimationClip clip = ResolvePreviewClip();
+        return new GUIContent(clip == null ? "Preview" : clip.name);
     }
 
     public override void OnPreviewSettings()
     {
-        UpdatePreviewClipEditor();
         if (previewClipEditor != null)
         {
             previewClipEditor.OnPreviewSettings();
-            return;
         }
-
-        base.OnPreviewSettings();
     }
 
     public override void OnPreviewGUI(Rect previewRect, GUIStyle background)
     {
-        UpdatePreviewClipEditor();
-        if (previewClipEditor != null)
-        {
-            previewClipEditor.OnPreviewGUI(previewRect, background);
-            return;
-        }
-
-        base.OnPreviewGUI(previewRect, background);
+        previewClipEditor?.OnPreviewGUI(previewRect, background);
     }
 
     public override void OnInteractivePreviewGUI(Rect previewRect, GUIStyle background)
     {
-        UpdatePreviewClipEditor();
-        if (previewClipEditor != null)
-        {
-            previewClipEditor.OnInteractivePreviewGUI(previewRect, background);
-            return;
-        }
-
-        base.OnInteractivePreviewGUI(previewRect, background);
+        previewClipEditor?.OnInteractivePreviewGUI(previewRect, background);
     }
 
     public override bool RequiresConstantRepaint()
     {
-        UpdatePreviewClipEditor();
-        return previewClipEditor != null
-            ? previewClipEditor.RequiresConstantRepaint()
-            : base.RequiresConstantRepaint();
+        return previewClipEditor != null && previewClipEditor.RequiresConstantRepaint();
     }
 
     private void UpdatePreviewClipEditor()
     {
-        AnimationClip previewClip = targets.Length == 1 && target is AbilityDefinition ability
-            ? ability.PreviewClip
-            : null;
-        if (previewClipEditor != null && previewClipEditorTarget == previewClip)
+        AnimationClip previewClip = ResolvePreviewClip();
+        if (previewClip == previewClipEditorTarget && previewClipEditor != null)
         {
             return;
         }
 
         DestroyPreviewClipEditor();
+        previewClipEditorTarget = previewClip;
         if (previewClip == null)
         {
             return;
         }
 
         System.Type editorType = System.Type.GetType("UnityEditor.AnimationClipEditor, UnityEditor");
-        if (editorType == null)
+        previewClipEditor = editorType != null
+            ? CreateEditor(previewClip, editorType)
+            : CreateEditor(previewClip);
+        if (previewClipEditor != null)
         {
-            return;
+            InitializePreviewTimeRange(previewClipEditor, previewClip);
         }
-
-        previewClipEditor = CreateEditor(previewClip, editorType);
-        previewClipEditorTarget = previewClip;
-        InitializePreviewTimeRange(previewClipEditor, previewClip);
     }
 
     private static void InitializePreviewTimeRange(
@@ -380,59 +805,5 @@ public sealed class AbilityDefinitionEditor : Editor
         }
 
         previewClipEditorTarget = null;
-    }
-
-    private static void DrawResolvedTimeline(AbilityDefinition ability)
-    {
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Resolved Timeline", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField("Frame Rate", ability.FrameRate.ToString("0.###"));
-        if (ability.AnimationClip != null)
-        {
-            EditorGUILayout.LabelField(
-                "Animation Frames",
-                ability.AnimationFrameCount.ToString());
-        }
-
-        EditorGUILayout.LabelField("Duration", $"{ability.Duration:0.###} s");
-        EditorGUILayout.LabelField(
-            "Phases",
-            $"Startup 1-{ability.StartupEndFrame}, " +
-            $"Active {ability.StartupEndFrame + 1}-{ability.ActiveEndFrame}, " +
-            $"Recovery {ability.ActiveEndFrame + 1}-{ability.RecoveryEndFrame}");
-    }
-
-    private static void DrawValidation(AbilityDefinition ability)
-    {
-        if (ability.TryValidate(out string validationError))
-        {
-            EditorGUILayout.HelpBox("Ability configuration is valid.", MessageType.Info);
-        }
-        else
-        {
-            EditorGUILayout.HelpBox(validationError, MessageType.Error);
-        }
-    }
-
-    private static void AddEmbeddedBoxEffect(AbilityDefinition ability)
-    {
-        BoxDamageEffectDefinition effect = CreateInstance<BoxDamageEffectDefinition>();
-        effect.name = $"{ability.name}_BoxDamage";
-        effect.hideFlags = HideFlags.HideInHierarchy;
-        AssetDatabase.AddObjectToAsset(effect, ability);
-
-        SerializedObject serializedAbility = new(ability);
-        SerializedProperty triggers = serializedAbility.FindProperty("effectTriggers");
-        int newIndex = triggers.arraySize;
-        triggers.InsertArrayElementAtIndex(newIndex);
-        SerializedProperty trigger = triggers.GetArrayElementAtIndex(newIndex);
-        trigger.FindPropertyRelative("frame").intValue =
-            Mathf.Max(1, ability.StartupEndFrame + 1);
-        trigger.FindPropertyRelative("effect").objectReferenceValue = effect;
-        serializedAbility.ApplyModifiedProperties();
-
-        EditorUtility.SetDirty(effect);
-        EditorUtility.SetDirty(ability);
-        AssetDatabase.SaveAssets();
     }
 }

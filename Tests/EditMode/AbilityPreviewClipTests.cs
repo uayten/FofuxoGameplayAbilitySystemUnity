@@ -9,10 +9,10 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void NoClips_HasNoPreview()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             try
             {
-                ability.SetAnimationClipsForTests(null, null);
+                ability.FirstStepForTests.SetAnimationClipForTests(null);
                 Assert.IsNull(ability.PreviewClip);
                 Assert.IsFalse(ability.HasAnimationPreview);
             }
@@ -25,13 +25,14 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void GameplayClipAlone_ShowsNoPreview()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip clip = new AnimationClip();
             try
             {
-                // The preview never shows the gameplay clip on its own: only
-                // an explicitly assigned preview clip is shown.
-                ability.SetAnimationClipsForTests(clip, null);
+                // The preview never shows a step's gameplay clip on its own:
+                // only the ability's own preview clip is shown. The Inspector
+                // offers a button per step that copies one across.
+                ability.FirstStepForTests.SetAnimationClipForTests(clip);
                 Assert.IsNull(ability.PreviewClip);
                 Assert.IsFalse(ability.HasAnimationPreview);
             }
@@ -45,12 +46,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void AssignedPreviewClip_IsUsedAsPreview()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip clip = new AnimationClip();
             AnimationClip preview = new AnimationClip();
             try
             {
-                ability.SetAnimationClipsForTests(clip, preview);
+                ability.FirstStepForTests.SetAnimationClipForTests(clip);
+                ability.SetPreviewClipForTests(preview);
                 Assert.AreSame(preview, ability.PreviewClip);
                 Assert.IsTrue(ability.HasAnimationPreview);
             }
@@ -62,11 +64,39 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             }
         }
 
+        /// <summary>
+        /// One preview clip serves every step, so adding steps must not change
+        /// what the preview panel plays.
+        /// </summary>
+        [Test]
+        public void PreviewClip_IsSharedByEveryStep()
+        {
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
+            AnimationClip preview = new AnimationClip();
+            try
+            {
+                ability.SetStepsForTests(
+                    new AbilityStep(),
+                    new AbilityStep(),
+                    new AbilityStep(),
+                    new AbilityStep());
+                ability.SetPreviewClipForTests(preview);
+
+                Assert.AreEqual(4, ability.StepCount);
+                Assert.AreSame(preview, ability.PreviewClip);
+            }
+            finally
+            {
+                Object.DestroyImmediate(preview);
+                Object.DestroyImmediate(ability);
+            }
+        }
+
         [Test]
         public void HostedNativePreview_UsesFullClipRange()
         {
-            AbilityDefinition ability =
-                ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability =
+                ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip preview = new AnimationClip
             {
                 frameRate = 60f,
@@ -82,7 +112,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             UnityEditor.Editor editor = null;
             try
             {
-                ability.SetAnimationClipsForTests(null, preview);
+                ability.SetPreviewClipForTests(preview);
                 editor = UnityEditor.Editor.CreateEditor(ability);
 
                 Assert.IsTrue(editor.HasPreviewGUI());
@@ -116,34 +146,15 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         [Test]
-        public void DerivedAbility_InheritsPreviewClip()
-        {
-            TargetAssistDefinition ability =
-                ScriptableObject.CreateInstance<TargetAssistDefinition>();
-            AnimationClip preview = new AnimationClip();
-            try
-            {
-                ability.SetAnimationClipsForTests(null, preview);
-                Assert.AreSame(preview, ability.PreviewClip);
-                Assert.IsTrue(ability.HasAnimationPreview);
-            }
-            finally
-            {
-                Object.DestroyImmediate(preview);
-                Object.DestroyImmediate(ability);
-            }
-        }
-
-        [Test]
         public void PreviewClip_DoesNotAffectValidation()
         {
-            AbilityDefinition ability = ScriptableObject.CreateInstance<AbilityDefinition>();
+            TimelineAbilityDefinition ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             AnimationClip preview = new AnimationClip();
             try
             {
                 ability.SetAbilityIdForTests("test.preview");
                 Assert.IsTrue(ability.TryValidate(out string before));
-                ability.SetAnimationClipsForTests(null, preview);
+                ability.SetPreviewClipForTests(preview);
                 Assert.IsTrue(ability.TryValidate(out string after));
                 Assert.AreSame(preview, ability.PreviewClip);
             }
@@ -161,12 +172,22 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 System.Reflection.BindingFlags.Public |
                 System.Reflection.BindingFlags.NonPublic;
 
-            System.Reflection.FieldInfo field =
-                target.GetType().GetField(fieldName, Flags);
-            Assert.IsNotNull(
-                field,
+            // Walks up the hierarchy: a private field of a base class is
+            // invisible to a single GetField call, and an ability's own fields
+            // sit one level above the timeline type most fixtures use.
+            for (System.Type type = target.GetType(); type != null; type = type.BaseType)
+            {
+                System.Reflection.FieldInfo field = type.GetField(
+                    fieldName, Flags | System.Reflection.BindingFlags.DeclaredOnly);
+                if (field != null)
+                {
+                    return field.GetValue(target);
+                }
+            }
+
+            Assert.Fail(
                 $"Expected field '{fieldName}' on {target.GetType().FullName}.");
-            return field.GetValue(target);
+            return null;
         }
     }
 }

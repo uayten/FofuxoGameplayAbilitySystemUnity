@@ -4,35 +4,160 @@ using UnityEngine;
 
 namespace Fofuxo.GameplayAbilitySystem
 {
+    /// <summary>
+    /// The actor's ability runtime: activation rules, running activations,
+    /// cooldowns, charges, tags, tasks, gameplay events and cues. Callers own
+    /// intent - no player input and no AI decision lives here.
+    /// </summary>
     [DisallowMultipleComponent]
+    [AddComponentMenu("Fofuxo/Gameplay Ability System")]
     public sealed class AbilitySystem : MonoBehaviour
     {
-        private const int AssistTargetCapacity = 32;
-        private static readonly Collider[] AssistTargetBuffer = new Collider[AssistTargetCapacity];
-
         [SerializeField] private AbilityLoadout loadout;
         [SerializeField] private Animator animator;
 
         private readonly Dictionary<AbilityDefinition, float> cooldownEndTimes = new();
-        private readonly Dictionary<AbilitySequenceDefinition, float> sequenceCooldownEndTimes = new();
         private readonly Dictionary<GameplayTag, int> grantedTagCounts = new();
+        private readonly Dictionary<GameplayTag, int> activeWindowTagCounts = new();
         private readonly HashSet<GameplayTag> looseTags = new();
-        private readonly List<GameplayTag> firedCues = new();
+        private readonly List<GameplayCueTrigger> firedCues = new();
+        private readonly List<GameplayTag> openedWindowTags = new();
+        private readonly List<GameplayTag> closedWindowTags = new();
         private readonly Dictionary<AbilityDefinition, float> charges = new();
         private readonly Dictionary<AbilityDefinition, float> chargeRestoreTimers = new();
+        /// <summary>Reused acquisition buffer for the targeting prelude.</summary>
+        private readonly AbilityTargetData assistTargets = new();
 
         private AbilityAnimationPlayer animationPlayer;
-        private AbilityInstance activeInstance;
-        private AbilitySequenceDefinition activeSequence;
-        private AbilityContext activeSequenceContext;
-        private int activeSequenceStep;
-        private bool awaitingManualAdvance;
-        private bool queuedSequenceAdvance;
-        private float manualAdvanceDeadline;
+        /// <summary>
+        /// Every running activation, oldest first. Exclusion groups decide how
+        /// many there can be: with the default policy an activation refuses to
+        /// start while anything is running, so this holds at most one and every
+        /// singular accessor below reports exactly what it always did.
+        /// </summary>
+        private readonly List<AbilityInstance> activeInstances = new();
+        /// <summary>Snapshot ticked over, so an effect may end an activation mid-loop.</summary>
+        private readonly List<AbilityInstance> tickBuffer = new();
+        /// <summary>Scratch list for the instances an activation has to displace.</summary>
+        private readonly List<AbilityInstance> supersededBuffer = new();
+        /// <summary>Scratch list for the instances a gameplay event may advance.</summary>
+        private readonly List<AbilityInstance> eventAdvanceBuffer = new();
+        /// <summary>
+        /// Tasks belonging to the actor rather than to any activation. A hit
+        /// reaction arriving while nothing is running has no activation to be
+        /// owned by, and inventing one to host it would be worse than saying so.
+        /// They end with the component, never silently outlive it.
+        /// </summary>
+        private readonly AbilityTaskScope actorTasks = new();
+        /// <summary>Ticked over a copy: a task may end another one as it finishes.</summary>
+        private readonly List<AbilityTask> taskBuffer = new();
+        /// <summary>
+        /// Separate from the tick buffer on purpose: a task ticking may raise the
+        /// very event that notifies tasks, and the two passes must not share the
+        /// list they are walking.
+        /// </summary>
+        private readonly List<AbilityTask> notifyBuffer = new();
+        private readonly List<AbilityMoveTask> movementBuffer = new();
+        /// <summary>Highest priority any movement task contends with this tick.</summary>
+        private int movementPriorityCeiling;
+        /// <summary>True once a task has taken the body for the tick being applied.</summary>
+        private bool movementOwnerTaken;
+        private IAbilityMotor motor;
+        private bool motorResolved;
+        /// <summary>Cached once: the owner's body never changes shape mid-run.</summary>
+        private Collider[] ownerColliders;
+        /// <summary>Created on the first record and never before; see <see cref="History"/>.</summary>
+        private AbilityEventHistory history;
+        /// <summary>Created on first use; see <see cref="Cues"/>.</summary>
+        private GameplayCueDispatcher cues;
+
+        /// <summary>
+        /// The activation the singular accessors speak for: the oldest one still
+        /// running. A concurrent ability started later never takes the primary
+        /// slot from the combo that was already going.
+        /// </summary>
+        private AbilityInstance activeInstance =>
+            activeInstances.Count > 0 ? activeInstances[0] : null;
 
         public AbilityDefinition ActiveAbility => activeInstance?.Definition;
-        public AbilitySequenceDefinition ActiveSequence => activeSequence;
+        public AbilityStep ActiveStep => activeInstance?.Step;
+        public int ActiveStepIndex => activeInstance?.StepIndex ?? 0;
+        /// <summary>True while an input would carry the activation into its next step.</summary>
+        public bool IsComboWindowOpen => activeInstance?.IsComboWindowOpen ?? false;
         public int ActiveFrame => activeInstance?.CurrentFrame ?? 0;
+
+        /// <summary>
+        /// Every running activation, oldest first. One entry unless an ability
+        /// opted into a group policy that lets abilities coexist.
+        /// </summary>
+        public IReadOnlyList<AbilityInstance> ActiveInstances => activeInstances;
+        public int ActiveAbilityCount => activeInstances.Count;
+
+        /// <summary>
+        /// The last request to advance a step on the primary activation and what
+        /// became of it — queued, consumed, expired, or refused for arriving
+        /// past the step's deadline. Survives the request, so a caller can read
+        /// back why the press it made did nothing.
+        /// </summary>
+        public AbilityStepIntent QueuedStepIntent =>
+            activeInstance?.Intent ?? AbilityStepIntent.None;
+
+        /// <summary>True while a request is queued and still waiting to be consumed.</summary>
+        public bool HasQueuedStepAdvance => activeInstance?.HasPendingIntent ?? false;
+
+        /// <summary>
+        /// Last frame of the running step that still accepts a request for the
+        /// next step, late grace included. Zero when the step accepts one until
+        /// it completes, and when nothing is running.
+        /// </summary>
+        public int ComboInputDeadlineFrame => activeInstance?.ComboInputDeadlineFrame ?? 0;
+
+        /// <summary>Seconds left before the running step stops accepting a request.</summary>
+        public float ComboInputTimeRemaining => activeInstance?.ComboInputTimeRemaining ?? 0f;
+
+        /// <summary>Seconds left in the running step.</summary>
+        public float StepTimeRemaining => activeInstance?.StepTimeRemaining ?? 0f;
+
+        /// <summary>
+        /// True while the primary activation has run out of step timeline under
+        /// the Hold Last Step timeout policy and is waiting for something to
+        /// advance, complete, or cancel it.
+        /// </summary>
+        public bool IsHoldingLastStep => activeInstance?.IsHoldingLastStep ?? false;
+
+        /// <summary>
+        /// Why the last activation changed step or ended. Kept after the ability
+        /// itself is gone, so a listener that reacts to an ending can still ask
+        /// what caused it.
+        /// </summary>
+        public AbilityStepTransition LastTransition { get; private set; }
+
+        /// <summary>
+        /// What happened to this actor lately, timestamped and oldest first:
+        /// every activation that was refused and why, every start, step
+        /// change, ending with its cancel tag, cue, gameplay event, effect
+        /// delivered or received, and task. Filled only while
+        /// <see cref="AbilityDiagnostics.Enabled"/> is on; reading this
+        /// property creates the ring, so a tool that only wants to know whether
+        /// anything was recorded asks <see cref="HasHistory"/> first.
+        /// </summary>
+        public AbilityEventHistory History =>
+            history ??= new AbilityEventHistory(AbilityDiagnostics.HistoryCapacity);
+
+        /// <summary>True once the history exists, which is once something was recorded.</summary>
+        public bool HasHistory => history != null;
+
+        /// <summary>
+        /// Evaluated every tick for an ability whose advancement is On
+        /// Condition, while the running step's combo window is open. Assigned
+        /// from game code when the condition belongs to the actor rather than to
+        /// the ability type; it takes precedence over
+        /// <see cref="TimelineAbilityDefinition.CanAdvanceStep"/>.
+        ///
+        /// Must be side-effect free: it is asked whether the step may advance,
+        /// not told to advance it.
+        /// </summary>
+        public Func<AbilityInstance, bool> StepAdvanceCondition { get; set; }
 
         public IReadOnlyCollection<GameplayTag> ActiveTags
         {
@@ -52,36 +177,178 @@ namespace Fofuxo.GameplayAbilitySystem
         }
         public AbilityPhase? ActivePhase => activeInstance?.CurrentPhase;
         public AbilityContext? ActiveContext => activeInstance?.Context;
+        /// <summary>
+        /// What the running activation's targeting acquired. Null when nothing
+        /// is active; empty when the ability has no targeting at all.
+        /// </summary>
+        public AbilityTargetData ActiveTargetData => activeInstance?.TargetData;
         public bool HasActiveDisplacement => activeInstance?.HasActiveDisplacement ?? false;
-        public bool IsMovementLocked =>
-            activeInstance != null &&
-            activeInstance.Definition.IsMovementLockedAtFrame(activeInstance.CurrentFrame);
-        public bool IsActive => activeInstance != null;
+
+        /// <summary>
+        /// Tasks the actor owns outside any activation — a hit reaction that
+        /// landed while nothing was running. Activation work belongs on
+        /// <see cref="AbilityInstance.Tasks"/> instead, where the activation
+        /// teardown ends it.
+        /// </summary>
+        public AbilityTaskScope ActorTasks => actorTasks;
+
+        /// <summary>
+        /// Where ability movement reaches the world. Resolved once from an
+        /// <see cref="IAbilityMotor"/> on the owner, or, when it has none, from
+        /// a plain Rigidbody so a project that never opted into the seam keeps
+        /// the movement it always had. Assignable, for a consumer that decides
+        /// its motor at runtime.
+        ///
+        /// **Null when the owner has neither.** It used to hand back a wrapper
+        /// around a null Rigidbody, which accepted every displacement and moved
+        /// nothing — an ability that looked authored, activated, played its
+        /// animation and travelled zero metres. An activation that needs
+        /// movement is now refused up front; see <see cref="HasMotor"/>.
+        /// </summary>
+        public IAbilityMotor Motor
+        {
+            get
+            {
+                if (!motorResolved)
+                {
+                    IAbilityMotor component = GetComponentInChildren<IAbilityMotor>(true);
+                    Rigidbody body = GetComponent<Rigidbody>();
+                    motor = component ?? (body != null
+                        ? new RigidbodyDisplacementMotor(body)
+                        : null);
+                    motorResolved = true;
+                }
+
+                return motor;
+            }
+            set
+            {
+                motor = value;
+                motorResolved = true;
+            }
+        }
+
+        /// <summary>
+        /// Whether ability movement has anywhere to go on this actor. False
+        /// means no <see cref="IAbilityMotor"/> and no Rigidbody, so every
+        /// displacement window, approach and move task would silently travel
+        /// nothing.
+        /// </summary>
+        public bool HasMotor => Motor != null;
+
+        internal float PlannedDisplacementDistanceForTests =>
+            activeInstance?.RemainingDisplacementDistanceForTests ?? 0f;
+        /// <summary>
+        /// True while at least one window in the current step is holding the tag.
+        /// Unlike <see cref="HasTag"/>, this ignores ability-wide grants and loose tags.
+        /// </summary>
+        public bool IsStepTagWindowOpen(GameplayTag tag)
+        {
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                if (activeInstances[i].IsTagWindowOpen(tag))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        /// <summary>
+        /// True while the owner must not move under its own input. Either the
+        /// running step has not reached its movement unlock frame, or a step tag
+        /// window is holding <see cref="CommonGameplayTags.MovementLocked"/> —
+        /// the window is the authored form, and it releases movement without
+        /// ending the ability.
+        /// </summary>
+        public bool IsMovementLocked
+        {
+            get
+            {
+                if (HasTag(CommonGameplayTags.MovementLocked))
+                {
+                    return true;
+                }
+
+                // Any running activation may hold movement: a concurrent ability
+                // that locks the owner still locks it while another one runs free.
+                for (int i = 0; i < activeInstances.Count; i++)
+                {
+                    AbilityInstance instance = activeInstances[i];
+                    if (instance.Definition.IsMovementLockedDuring(instance))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+        public bool IsActive => activeInstances.Count > 0;
         public AbilityLoadout Loadout => loadout;
 
         public event Action<AbilityDefinition> AbilityStarted;
         public event Action<AbilityDefinition, AbilityPhase> AbilityPhaseChanged;
         public event Action<AbilityDefinition> AbilityCompleted;
-        public event Action<AbilityDefinition, AbilityCancelReason> AbilityCancelled;
-        public event Action<AbilitySequenceDefinition> SequenceCompleted;
-        public event Action<AbilitySequenceDefinition, AbilityCancelReason> SequenceCancelled;
+        public event Action<AbilityDefinition, GameplayTag> AbilityCancelled;
+        /// <summary>Fires when a combo carries on into its next step.</summary>
+        public event Action<AbilityDefinition, int> AbilityStepAdvanced;
         /// <summary>
-        /// Fires when a manual sequence finishes a step and waits for
-        /// <see cref="TryAdvanceSequence"/> before running the next one.
+        /// Fires for every step change and every ending, carrying why it
+        /// happened. A step advance raises both this and
+        /// <see cref="AbilityStepAdvanced"/>; only this one explains the cause.
         /// </summary>
-        public event Action<AbilitySequenceDefinition, int> SequenceAwaitingAdvance;
+        public event Action<AbilityStepTransition> StepTransitioned;
+        /// <summary>
+        /// Fires whenever a request to advance a step changes state: accepted,
+        /// consumed, expired, or refused. Every accepted request reaches exactly
+        /// one terminal state, so a listener can account for each one.
+        /// </summary>
+        public event Action<AbilityDefinition, AbilityStepIntent> StepIntentChanged;
         /// <summary>
         /// Fires when an ability with effect triggers completes without
         /// registering any hit.
         /// </summary>
         public event Action<AbilityDefinition, AbilityContext> AbilityWhiffed;
 
-        public IAbilityReplicationSink ReplicationSink { get; set; }
         /// <summary>
-        /// Fires for cosmetic cues only. Game code presents them as VFX, SFX,
-        /// or UI and must never change gameplay state in response.
+        /// Fires when the first step window for a tag opens (true) or the last
+        /// one closes (false). Overlapping windows for the same tag produce one
+        /// effective transition. <see cref="HasTag"/> may remain true when the
+        /// same tag also comes from an ability-wide grant or a loose tag.
         /// </summary>
-        public event Action<AbilityDefinition, GameplayTag, AbilityContext> GameplayCueTriggered;
+        public event Action<GameplayTag, bool> StepTagWindowChanged;
+
+        public IAbilityReplicationSink ReplicationSink { get; set; }
+
+        /// <summary>
+        /// Fires for every cue event this actor is the subject of - a step cue,
+        /// an effect that landed on it, a manual one - after the dispatcher's
+        /// filters. Cosmetic only: game code presents and must never change
+        /// gameplay state in response. Presenters that pool register with
+        /// <see cref="Cues"/> instead and get the same parameters.
+        /// </summary>
+        public event Action<GameplayCueParameters> GameplayCueTriggered;
+
+        /// <summary>
+        /// Where this actor's cues are raised, kept while persistent, and
+        /// presented. Effects landing on this actor raise theirs here through
+        /// the effect container; step cues and <see cref="TriggerGameplayCue"/>
+        /// raise here directly.
+        /// </summary>
+        public GameplayCueDispatcher Cues
+        {
+            get
+            {
+                if (cues == null)
+                {
+                    cues = new GameplayCueDispatcher(gameObject);
+                    cues.CueRaised += OnCueRaised;
+                }
+
+                return cues;
+            }
+        }
 
         private void Awake()
         {
@@ -101,284 +368,1211 @@ namespace Fofuxo.GameplayAbilitySystem
             Tick(Time.deltaTime);
         }
 
+        /// <summary>
+        /// Drives the tasks that asked for the physics step. Nothing on the
+        /// ability timeline runs here: the timeline keeps its own clock, and
+        /// this exists so travel that has to be felt — a knockback — lands where
+        /// <c>MovePosition</c> is actually read.
+        /// </summary>
+        private void FixedUpdate()
+        {
+            TickFixed(Time.fixedDeltaTime);
+        }
+
         internal void Tick(float deltaTime)
         {
             animationPlayer?.Tick(deltaTime);
             TickChargeRestore(deltaTime);
 
-            if (activeInstance == null)
+            if (activeInstances.Count == 0 && actorTasks.Count == 0)
             {
-                if (awaitingManualAdvance &&
-                    activeSequence != null &&
-                    activeSequence.ManualAdvanceWindow > 0f &&
-                    Time.time > manualAdvanceDeadline)
+                return;
+            }
+
+            PrepareMovementArbitration(AbilityTaskTickPhase.Update);
+
+            // Ticking a copy: an effect fired below may cancel this activation or
+            // start another, and the list must be free to change underneath.
+            tickBuffer.Clear();
+            tickBuffer.AddRange(activeInstances);
+            for (int i = 0; i < tickBuffer.Count; i++)
+            {
+                AbilityInstance instance = tickBuffer[i];
+                if (!activeInstances.Contains(instance))
                 {
-                    CancelSequenceOnly(AbilityCancelReason.Manual);
+                    continue;
                 }
 
-                return;
+                TickInstance(instance, deltaTime);
             }
 
-            if (activeInstance.Definition.RequiresTarget && activeInstance.Context.Target == null)
+            tickBuffer.Clear();
+            TickScope(actorTasks, AbilityTaskTickPhase.Update, deltaTime);
+            PruneTaskScopes();
+        }
+
+        /// <summary>
+        /// One pass over the tasks that run on the physics step, across every
+        /// activation and the actor scope, with the same movement arbitration
+        /// the frame pass uses.
+        /// </summary>
+        internal void TickFixed(float deltaTime)
+        {
+            if (activeInstances.Count == 0 && actorTasks.Count == 0)
             {
-                ForceCancelActiveAbility(AbilityCancelReason.TargetLost);
                 return;
             }
 
-            AbilityInstance instanceAtStart = activeInstance;
+            PrepareMovementArbitration(AbilityTaskTickPhase.FixedUpdate);
+
+            tickBuffer.Clear();
+            tickBuffer.AddRange(activeInstances);
+            for (int i = 0; i < tickBuffer.Count; i++)
+            {
+                AbilityInstance instance = tickBuffer[i];
+                if (!activeInstances.Contains(instance))
+                {
+                    continue;
+                }
+
+                TickScope(instance.Tasks, AbilityTaskTickPhase.FixedUpdate, deltaTime);
+            }
+
+            tickBuffer.Clear();
+            TickScope(actorTasks, AbilityTaskTickPhase.FixedUpdate, deltaTime);
+            PruneTaskScopes();
+        }
+
+        private void TickInstance(AbilityInstance instance, float deltaTime)
+        {
+            if (instance.Definition.RequiresTarget && instance.Context.Target == null)
+            {
+                ForceCancelAbility(instance, CommonGameplayTags.CancelTargetLost);
+                return;
+            }
+
+            // A held step has run out of timeline. It keeps waiting for an
+            // advance, so it stops consuming time instead of re-running its
+            // timeout every frame.
+            if (instance.IsHoldingLastStep)
+            {
+                TryAdvanceOnCondition(instance);
+                TryConsumeQueuedIntent(instance);
+                return;
+            }
+
             bool completed;
             AbilityPhase previousPhase;
             firedCues.Clear();
             try
             {
-                completed = activeInstance.Tick(this, deltaTime, out previousPhase, firedCues);
+                completed = instance.Tick(this, deltaTime, out previousPhase, firedCues);
             }
             catch (Exception exception)
             {
+                // The consumer broke, not the game design: the activation ends
+                // under its own tag so a handler can tell a bug from a roll
+                // cancelling a swing.
                 Debug.LogException(exception, this);
-                ForceCancelActiveAbility(AbilityCancelReason.Manual);
+                ForceCancelAbility(instance, CommonGameplayTags.CancelFailed);
                 return;
             }
 
-            if (activeInstance != instanceAtStart)
+            if (!activeInstances.Contains(instance))
             {
                 return;
             }
+
+            instance.SyncTagWindows(openedWindowTags, closedWindowTags);
+            ApplyTagWindowChanges();
 
             for (int i = 0; i < firedCues.Count; i++)
             {
-                GameplayCueTriggered?.Invoke(
-                    activeInstance.Definition,
-                    firedCues[i],
-                    activeInstance.Context);
-                ReplicationSink?.OnGameplayCue(firedCues[i], activeInstance.Context);
+                RaiseStepCue(instance, firedCues[i]);
             }
 
-            if (previousPhase != activeInstance.CurrentPhase)
+            if (previousPhase != instance.CurrentPhase)
             {
-                AbilityPhaseChanged?.Invoke(activeInstance.Definition, activeInstance.CurrentPhase);
+                AbilityPhaseChanged?.Invoke(instance.Definition, instance.CurrentPhase);
             }
 
-            ApplyActiveDisplacement(activeInstance, deltaTime);
+            // The activation tasks advance with the activation, and its movement
+            // is arbitrated here rather than after the loop: a step that finishes
+            // below starts the next step travel, and that one belongs to the
+            // next tick, not to this one.
+            TickScope(instance.Tasks, AbilityTaskTickPhase.Update, deltaTime);
 
-            if (TryProcessQueuedSequenceAdvance())
+            if (!activeInstances.Contains(instance))
             {
                 return;
             }
 
-            ExpireSequenceInputWindow();
+            if (TryAdvanceOnCondition(instance))
+            {
+                return;
+            }
+
+            if (TryConsumeQueuedIntent(instance))
+            {
+                return;
+            }
 
             if (completed)
             {
-                CompleteActiveAbility();
+                FinishStep(instance);
             }
         }
 
         private void OnDisable()
         {
-            if (activeInstance != null)
-            {
-                CancelActiveAbilityInternal(AbilityCancelReason.Manual);
-            }
-            else if (activeSequence != null)
-            {
-                CancelSequenceOnly(AbilityCancelReason.Manual);
-            }
-
-            animationPlayer?.Dispose();
-            animationPlayer = null;
-            looseTags.Clear();
-            grantedTagCounts.Clear();
+            ClearRuntimeState();
         }
 
+        private void OnDestroy()
+        {
+            ClearRuntimeState();
+        }
+
+        /// <summary>
+        /// Runs every activation check and reports the outcome as a typed
+        /// result. Side effect free, so it is safe to call from AI scoring or
+        /// from UI that greys out an unusable ability.
+        /// </summary>
+        public AbilityActivationResult EvaluateActivation(
+            AbilityDefinition ability, AbilityContext context)
+        {
+            return EvaluateActivationInternal(ability, context);
+        }
+
+        /// <summary>
+        /// The message-only form, kept for callers that only ever log the
+        /// reason. Prefer <see cref="EvaluateActivation"/> when the caller has
+        /// to branch on why the activation failed.
+        /// </summary>
         public bool CanActivate(
             AbilityDefinition ability,
             AbilityContext context,
             out string rejectionReason)
         {
-            return CanActivateInternal(ability, context, false, out rejectionReason);
+            AbilityActivationResult result = EvaluateActivationInternal(ability, context);
+            rejectionReason = result.Message;
+            return result.IsAccepted;
         }
 
         public bool TryActivate(AbilityDefinition ability, AbilityContext context)
         {
-            if (!CanActivateInternal(ability, context, false, out _))
-            {
-                return false;
-            }
-
-            return ActivateInternal(ability, context);
+            return TryActivate(ability, context, out _);
         }
 
-        public bool CanActivateSequence(
-            AbilitySequenceDefinition sequence,
+        /// <summary>
+        /// Activates the ability and reports the rejection code when it does
+        /// not start. The result is <see cref="AbilityActivationResult.Accepted"/>
+        /// only when the ability actually became active.
+        /// </summary>
+        public bool TryActivate(
+            AbilityDefinition ability,
             AbilityContext context,
-            out string rejectionReason)
+            out AbilityActivationResult result)
         {
-            if (sequence == null)
-            {
-                rejectionReason = "Sequence is null.";
-                return false;
-            }
-
-            if (activeInstance != null || activeSequence != null)
-            {
-                rejectionReason = "Another ability or sequence is active.";
-                return false;
-            }
-
-            if (loadout == null || !loadout.Contains(sequence))
-            {
-                rejectionReason = "Sequence is not granted by the current loadout.";
-                return false;
-            }
-
-            if (sequence.Steps.Count == 0)
-            {
-                rejectionReason = "Sequence has no steps.";
-                return false;
-            }
-
-            if (IsOnCooldown(sequence))
-            {
-                rejectionReason = "Sequence is on cooldown.";
-                return false;
-            }
-
-            return CanActivateInternal(sequence.Steps[0], context, true, out rejectionReason);
+            return TryActivate(ability, context, null, null, out result);
         }
 
-        public bool TryActivateSequence(
-            AbilitySequenceDefinition sequence,
-            AbilityContext context)
+        /// <summary>
+        /// The one attempt path. Every public activation ends here, so the
+        /// rejection record, the evaluation and the start cannot disagree.
+        /// </summary>
+        private bool TryActivate(
+            AbilityDefinition ability,
+            AbilityContext context,
+            AbilityTargetData suppliedTargets,
+            GameplayEffectSpec cause,
+            out AbilityActivationResult result)
         {
-            if (!CanActivateSequence(sequence, context, out _))
+            result = EvaluateActivationInternal(ability, context);
+            if (!result.IsAccepted)
+            {
+                RecordRejection(ability, in result);
+                return false;
+            }
+
+            return ActivateInternal(ability, context, suppliedTargets, cause);
+        }
+
+        /// <summary>
+        /// Activates with targets the caller already resolved, skipping local
+        /// acquisition entirely. A scripted sequence, an AI that picked its
+        /// victim, or a consumer with its own targeting reticle owns the
+        /// selection; the ability owns everything after it.
+        /// </summary>
+        /// <param name="suppliedTargets">
+        /// Copied into the activation, so the caller stays free to reuse its
+        /// buffer. Null falls back to the ability's own target assist.
+        /// </param>
+        public bool TryActivateWithTargets(
+            AbilityDefinition ability,
+            AbilityContext context,
+            AbilityTargetData suppliedTargets,
+            out AbilityActivationResult result)
+        {
+            return TryActivate(ability, context, suppliedTargets, null, out result);
+        }
+
+        /// <summary>
+        /// Activates the first granted ability whose GameplayEvent trigger
+        /// matches. A running instance of that same ability consumes repeated
+        /// events without restarting, allowing successive impacts to update its
+        /// runtime work while its granted tags remain stable.
+        /// </summary>
+        public bool TryHandleGameplayEvent(
+            GameplayTag eventTag,
+            AbilityContext context,
+            out AbilityDefinition triggeredAbility)
+        {
+            return TryHandleGameplayEvent(eventTag, context, null, out triggeredAbility);
+        }
+
+        /// <summary>
+        /// The same, with the effect application that raised the event attached.
+        /// The activation it starts reads it through
+        /// <see cref="AbilityInstance.TriggeringSpec"/>, which is how a hit
+        /// reaction learns what hit it — source, level, contact, knockback —
+        /// without a struct being handed to anyone.
+        ///
+        /// Every granted ability whose trigger matches is a candidate, in
+        /// loadout order, and the first one that activates wins. One that is
+        /// refused — a required tag it lacks, the owner's i-frames, a running
+        /// ability that will not be interrupted — passes the event to the next,
+        /// so a guard reaction that requires <c>State.Attacking</c> can sit
+        /// above the plain flinch and take the hit only while the owner swings.
+        /// </summary>
+        public bool TryHandleGameplayEvent(
+            GameplayTag eventTag,
+            AbilityContext context,
+            GameplayEffectSpec cause,
+            out AbilityDefinition triggeredAbility)
+        {
+            triggeredAbility = null;
+            if (eventTag.IsEmpty)
             {
                 return false;
             }
 
-            AbilityDefinition firstStep = sequence.Steps[0];
-            activeSequence = sequence;
-            activeSequenceContext = context;
-            activeSequenceStep = 0;
-            if (ActivateInternal(firstStep, context))
+            if (AbilityDiagnostics.Enabled)
+            {
+                Record(AbilityEvent.GameplayEventReceived(eventTag, context.Owner));
+            }
+
+            // Waiting tasks hear every event, before anything decides what the
+            // event does to the timeline. A task waiting on a tag is not
+            // competing with step advancement for it: one moves the activation
+            // on, the other resolves work inside the step it is already in.
+            NotifyGameplayEventTasks(eventTag, context);
+            if (loadout == null)
+            {
+                return false;
+            }
+
+            // A running ability that advances on this event owns it: the author
+            // named the tag on the ability itself, so the event belongs to the
+            // activation in flight before it belongs to any activation trigger.
+            if (TryAdvanceStepOnEvent(eventTag, out triggeredAbility))
             {
                 return true;
             }
 
-            ClearActiveSequence();
+            AbilityContext ownerContext = context.Owner == gameObject
+                ? context
+                : new AbilityContext(
+                    gameObject,
+                    context.Target,
+                    context.Direction,
+                    context.AimPoint);
+
+            IReadOnlyList<AbilityDefinition> abilities = loadout.Abilities;
+            for (int i = 0; i < abilities.Count; i++)
+            {
+                AbilityDefinition ability = abilities[i];
+                if (ability == null ||
+                    !TryFindMatchingTrigger(ability, eventTag, out AbilityActivationTrigger trigger))
+                {
+                    continue;
+                }
+
+                AbilityInstance running = FindInstance(ability);
+                if (running != null)
+                {
+                    if (!trigger.RestartsWhenActive)
+                    {
+                        // Consumed without restarting: the running activation
+                        // carries on, which is what a body still in flight wants.
+                        triggeredAbility = ability;
+                        return true;
+                    }
+
+                    // Decided before anything ends, like every interruption: a
+                    // restart the owner would refuse must not cost it the
+                    // reaction it already has.
+                    if (!EvaluateActivationInternal(ability, ownerContext, skipExclusion: true)
+                            .IsAccepted)
+                    {
+                        continue;
+                    }
+
+                    ForceCancelAbility(running, CommonGameplayTags.CancelSuperseded);
+                }
+
+                if (activeInstance != null &&
+                    !TryClearTheWayForTrigger(ability, trigger, ownerContext))
+                {
+                    continue;
+                }
+
+                if (!TryActivate(ability, ownerContext, null, cause, out _))
+                {
+                    continue;
+                }
+
+                triggeredAbility = ability;
+                return true;
+            }
+
             return false;
         }
 
-        public bool TryCancelActiveAbility(AbilityCancelReason reason)
+        private static bool TryFindMatchingTrigger(
+            AbilityDefinition ability,
+            GameplayTag eventTag,
+            out AbilityActivationTrigger match)
         {
-            if (activeInstance == null ||
-                !activeInstance.Definition.CanBeCancelledBy(reason))
+            IReadOnlyList<AbilityActivationTrigger> triggers = ability.ActivationTriggers;
+            for (int t = 0; t < triggers.Count; t++)
             {
+                if (triggers[t].Matches(eventTag))
+                {
+                    match = triggers[t];
+                    return true;
+                }
+            }
+
+            match = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Completes an externally-finished ability only when it is still the
+        /// active instance. Physics reactions use this after landing or settling.
+        /// </summary>
+        /// <summary>
+        /// Whether an interrupting activation trigger may take the running
+        /// abilities' place, and cancels them when it may.
+        ///
+        /// **The decision comes before the cancellation, and that order is the
+        /// whole point.** Cancelling first let an incoming event strip the very
+        /// tags that would have refused it: an owner mid-roll lost its
+        /// `State.Invulnerable` to the cancel and then failed the blocked-tag
+        /// check that i-frames exist to win. It also took down abilities whose
+        /// own cancel policy refuses to be interrupted, which the group
+        /// exclusion path has always respected and this one did not.
+        ///
+        /// The exclusion rule is skipped in the evaluation because clearing the
+        /// way is exactly what this method is for; everything else — blocked
+        /// tags, required tags, cooldown, charges, costs, range, motor — is
+        /// answered against the world as it stands, before anything is ended.
+        /// </summary>
+        private bool TryClearTheWayForTrigger(
+            AbilityDefinition ability,
+            AbilityActivationTrigger trigger,
+            AbilityContext ownerContext)
+        {
+            if (!trigger.InterruptActiveAbility)
+            {
+                if (AbilityDiagnostics.Enabled)
+                {
+                    RecordRejection(ability, Reject(
+                        AbilityActivationRejection.AnotherAbilityActive,
+                        $"'{ability.AbilityId}' was triggered while '{ActiveAbility.AbilityId}' " +
+                        "is running, and its trigger does not interrupt."));
+                }
+
                 return false;
             }
 
-            CancelActiveAbilityInternal(reason);
+            AbilityActivationResult evaluation =
+                EvaluateActivationInternal(ability, ownerContext, skipExclusion: true);
+            if (!evaluation.IsAccepted)
+            {
+                RecordRejection(ability, in evaluation);
+                return false;
+            }
+
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                if (!activeInstances[i].Definition.CanBeCancelledBy(
+                        CommonGameplayTags.CancelSuperseded))
+                {
+                    if (AbilityDiagnostics.Enabled)
+                    {
+                        RecordRejection(ability, Reject(
+                            AbilityActivationRejection.BlockedByUncancellableAbility,
+                            $"'{activeInstances[i].Definition.AbilityId}' refuses " +
+                            $"{CommonGameplayTags.CancelSuperseded}, so the trigger " +
+                            $"for '{ability.AbilityId}' cannot clear the way."));
+                    }
+
+                    return false;
+                }
+            }
+
+            ForceCancelActiveAbility(CommonGameplayTags.CancelSuperseded);
             return true;
         }
 
-        public void ForceCancelActiveAbility(AbilityCancelReason reason)
+        public bool TryCompleteActiveAbility(AbilityDefinition expectedAbility)
         {
-            if (activeInstance != null)
-            {
-                CancelActiveAbilityInternal(reason);
-            }
-        }
-
-        /// <summary>
-        /// Advances a manual sequence waiting after a completed step. Each
-        /// call runs one step, so player combos can require one input per hit.
-        /// </summary>
-        public bool TryAdvanceSequence()
-        {
-            if (activeSequence == null ||
-                !awaitingManualAdvance ||
-                activeInstance != null ||
-                activeSequenceStep < 0 ||
-                activeSequenceStep >= activeSequence.Steps.Count)
+            AbilityInstance instance = FindInstance(expectedAbility);
+            if (instance == null)
             {
                 return false;
             }
 
-            if (activeSequence.ManualAdvanceWindow > 0f &&
-                Time.time > manualAdvanceDeadline)
-            {
-                CancelSequenceOnly(AbilityCancelReason.Manual);
-                return false;
-            }
-
-            AbilityDefinition nextStep = activeSequence.Steps[activeSequenceStep];
-            awaitingManualAdvance = false;
-            if (CanActivateInternal(nextStep, activeSequenceContext, true, out _) &&
-                ActivateInternal(nextStep, activeSequenceContext))
-            {
-                return true;
-            }
-
-            CancelSequenceOnly(AbilityCancelReason.Manual);
-            return false;
-        }
-
-        /// <summary>
-        /// Records one input for the next step of a manual sequence. During an
-        /// active step, the input is retained until its Combo Continue Frame;
-        /// after the Combo Input End Frame it is rejected. Legacy steps whose
-        /// frame window is zero continue to advance after normal completion.
-        /// </summary>
-        public bool TryQueueSequenceAdvance()
-        {
-            if (activeSequence == null ||
-                activeSequence.Advancement != SequenceAdvancement.Manual ||
-                activeSequenceStep >= activeSequence.Steps.Count - 1)
-            {
-                return false;
-            }
-
-            if (IsAwaitingSequenceAdvance)
-            {
-                return TryAdvanceSequence();
-            }
-
-            if (activeInstance == null)
-            {
-                return false;
-            }
-
-            int inputEndFrame = activeInstance.Definition.ComboInputEndFrame;
-            if (inputEndFrame > 0 && ActiveFrame > inputEndFrame)
-            {
-                return false;
-            }
-
-            queuedSequenceAdvance = true;
+            CompleteAbility(instance, AbilityStepTransitionReason.Completed);
             return true;
         }
 
         /// <summary>
-        /// Cancels the active ability or a sequence waiting for manual advance.
+        /// Interrupts every running ability whose cancel policy accepts a
+        /// request carrying <paramref name="cancelTag"/>. With one ability
+        /// running — the default everywhere — this is the single cancellation it
+        /// always was.
         /// </summary>
-        public bool TryCancelSequence(AbilityCancelReason reason)
+        /// <returns>True when at least one ability was interrupted.</returns>
+        public bool TryCancelActiveAbility(GameplayTag cancelTag)
         {
-            if (activeInstance != null)
+            bool cancelled = false;
+            for (int i = activeInstances.Count - 1; i >= 0; i--)
             {
-                return TryCancelActiveAbility(reason);
+                if (i >= activeInstances.Count)
+                {
+                    continue;
+                }
+
+                AbilityInstance instance = activeInstances[i];
+                if (!instance.Definition.CanBeCancelledBy(cancelTag))
+                {
+                    continue;
+                }
+
+                CancelAbilityInternal(
+                    instance, cancelTag, AbilityStepTransitionReason.Cancelled);
+                cancelled = true;
             }
 
-            if (activeSequence != null)
+            return cancelled;
+        }
+
+        /// <summary>
+        /// Interrupts one named ability when its cancel policy accepts the
+        /// request, for a caller that must not disturb the others.
+        /// </summary>
+        public bool TryCancelAbility(AbilityDefinition ability, GameplayTag cancelTag)
+        {
+            AbilityInstance instance = FindInstance(ability);
+            if (instance == null || !instance.Definition.CanBeCancelledBy(cancelTag))
             {
-                CancelSequenceOnly(reason);
+                return false;
+            }
+
+            CancelAbilityInternal(instance, cancelTag, AbilityStepTransitionReason.Cancelled);
+            return true;
+        }
+
+        /// <summary>
+        /// Ends the running step of the primary activation without deciding what
+        /// the ability does next: the step's own timeout policy does that, so a
+        /// combo ends on the step it reached while a Hold Last Step sequence
+        /// keeps waiting. This is the step-scoped half of cancellation — use
+        /// <see cref="TryCancelActiveAbility"/> to end the whole activation.
+        /// </summary>
+        public bool TryCancelActiveStep(GameplayTag cancelTag)
+        {
+            AbilityInstance instance = activeInstance;
+            if (instance == null || !instance.Definition.CanBeCancelledBy(cancelTag))
+            {
+                return false;
+            }
+
+            ExpirePendingIntent(instance);
+            if (!activeInstances.Contains(instance))
+            {
                 return true;
+            }
+
+            RaiseTransition(
+                instance,
+                AbilityStepTransitionReason.StepCancelled,
+                instance.StepIndex,
+                cancelTag);
+            FinishStep(instance);
+            return true;
+        }
+
+        /// <summary>
+        /// Interrupts every running ability whatever its cancel policy says.
+        /// Death, disable, and destruction go through here.
+        /// </summary>
+        public void ForceCancelActiveAbility(GameplayTag cancelTag)
+        {
+            for (int i = activeInstances.Count - 1; i >= 0; i--)
+            {
+                if (i < activeInstances.Count)
+                {
+                    ForceCancelAbility(activeInstances[i], cancelTag);
+                }
+            }
+        }
+
+        private void ForceCancelAbility(AbilityInstance instance, GameplayTag cancelTag)
+        {
+            if (instance != null && activeInstances.Contains(instance))
+            {
+                CancelAbilityInternal(
+                    instance, cancelTag, AbilityStepTransitionReason.Cancelled);
+            }
+        }
+
+        /// <summary>
+        /// Buffers one input for the next step of a Manual combo. The input is
+        /// held until the running step reaches its Combo Continue Frame and is
+        /// rejected once the step passes its Combo Input End Frame, so the
+        /// window is authored in frames on the step and nowhere else.
+        /// </summary>
+        public bool TryQueueStepAdvance()
+        {
+            return TryQueueStepAdvance(activeInstance, AbilityStepIntentSource.Input);
+        }
+
+        /// <summary>
+        /// Buffers a request for a named ability rather than the primary one,
+        /// for a caller driving a concurrent activation.
+        /// </summary>
+        public bool TryQueueStepAdvance(AbilityDefinition ability)
+        {
+            return TryQueueStepAdvance(FindInstance(ability), AbilityStepIntentSource.Input);
+        }
+
+        /// <summary>
+        /// Carries an activation whose advancement is On Event into its next
+        /// step. The event only queues the request: the step's combo window
+        /// still decides when the advance happens, so an event and an input
+        /// reach the next step through the same authored frames.
+        /// </summary>
+        /// <returns>True when a running activation accepted the event.</returns>
+        public bool TryAdvanceStepOnEvent(GameplayTag eventTag)
+        {
+            return TryAdvanceStepOnEvent(eventTag, out _);
+        }
+
+        /// <param name="advancedAbility">
+        /// The first ability that accepted the event, so a caller routing every
+        /// gameplay event can report which one consumed it.
+        /// </param>
+        public bool TryAdvanceStepOnEvent(
+            GameplayTag eventTag, out AbilityDefinition advancedAbility)
+        {
+            advancedAbility = null;
+            if (eventTag.IsEmpty)
+            {
+                return false;
+            }
+
+            bool accepted = false;
+            // A copy: consuming a late request advances a step, and an ability
+            // that ends there leaves the list one shorter mid-loop.
+            eventAdvanceBuffer.Clear();
+            eventAdvanceBuffer.AddRange(activeInstances);
+            for (int i = 0; i < eventAdvanceBuffer.Count; i++)
+            {
+                AbilityInstance instance = eventAdvanceBuffer[i];
+                TimelineAbilityDefinition ability = instance.Timeline;
+                if (ability == null ||
+                    ability.StepAdvancement != AbilityStepAdvancement.OnEvent ||
+                    ability.StepAdvanceEventTag != eventTag ||
+                    !activeInstances.Contains(instance))
+                {
+                    continue;
+                }
+
+                if (TryQueueStepAdvance(instance, AbilityStepIntentSource.GameplayEvent))
+                {
+                    accepted = true;
+                    advancedAbility ??= ability;
+                }
+            }
+
+            eventAdvanceBuffer.Clear();
+            return accepted;
+        }
+
+        /// <summary>
+        /// Records a request to advance, if the activation is in a mode that
+        /// waits for one and the running step still accepts it. A request that
+        /// arrives inside the step's late grace frames is accepted too and
+        /// advances at once, because the window it belonged to has closed.
+        /// </summary>
+        private bool TryQueueStepAdvance(
+            AbilityInstance instance, AbilityStepIntentSource source)
+        {
+            if (instance?.Timeline == null ||
+                !instance.Timeline.WaitsToAdvance ||
+                !instance.HasNextStep)
+            {
+                return false;
+            }
+
+            AbilityStep step = instance.Step;
+            if (step != null && !step.AcceptsComboInput(instance.CurrentFrame))
+            {
+                instance.RejectIntent(source, true);
+                StepIntentChanged?.Invoke(instance.Definition, instance.Intent);
+                return false;
+            }
+
+            bool isLate = step != null && step.IsLateComboInput(instance.CurrentFrame);
+            instance.QueueIntent(source, isLate);
+            StepIntentChanged?.Invoke(instance.Definition, instance.Intent);
+
+            // A late request has already missed its window, so waiting for the
+            // window to open would drop it. Consume it now.
+            if (isLate)
+            {
+                TryConsumeQueuedIntent(instance);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Carries a buffered request into the next step as soon as the running
+        /// step opens its combo window, or immediately when the request came in
+        /// late and the window is already behind it.
+        /// </summary>
+        private bool TryConsumeQueuedIntent(AbilityInstance instance)
+        {
+            if (instance == null || !instance.HasPendingIntent || !instance.HasNextStep)
+            {
+                return false;
+            }
+
+            bool late = instance.Intent.IsLate;
+            if (!late && !instance.IsComboWindowOpen)
+            {
+                return false;
+            }
+
+            return AdvanceStep(
+                instance,
+                late
+                    ? AbilityStepTransitionReason.LateGraceIntent
+                    : AbilityStepTransitionReason.QueuedIntent,
+                instance.Intent.Source == AbilityStepIntentSource.GameplayEvent
+                    ? instance.Timeline.StepAdvanceEventTag
+                    : default);
+        }
+
+        /// <summary>
+        /// Polls the advance condition of an On Condition activation while its
+        /// step's combo window is open. The condition is asked, never told: a
+        /// consumer that mutates state inside it will see it evaluated more than
+        /// once per step.
+        /// </summary>
+        private bool TryAdvanceOnCondition(AbilityInstance instance)
+        {
+            if (instance?.Timeline == null ||
+                instance.Timeline.StepAdvancement != AbilityStepAdvancement.OnCondition ||
+                !instance.HasNextStep)
+            {
+                return false;
+            }
+
+            // A held step has already passed its window, so it keeps polling:
+            // holding exists precisely to wait for something that has not
+            // happened yet.
+            if (!instance.IsHoldingLastStep && !instance.IsComboWindowOpen)
+            {
+                return false;
+            }
+
+            return EvaluateAdvanceCondition(instance) &&
+                   AdvanceStep(instance, AbilityStepTransitionReason.QueuedIntent, default);
+        }
+
+        /// <summary>
+        /// A delegate assigned on the system wins over the ability's own hook:
+        /// the actor knows more than the ability type does, and two sources of
+        /// truth that both vote would make the outcome depend on their order.
+        /// </summary>
+        private bool EvaluateAdvanceCondition(AbilityInstance instance)
+        {
+            return StepAdvanceCondition != null
+                ? StepAdvanceCondition(instance)
+                : instance.Timeline.CanAdvanceStep(instance);
+        }
+
+        /// <summary>
+        /// A step reached the end of its timeline. Automatic combos chain on
+        /// their own; every waiting mode consults its timeout policy, whose
+        /// default ends the ability on the step it reached — which is the whole
+        /// cancellation path a player combo needs.
+        /// </summary>
+        private void FinishStep(AbilityInstance instance)
+        {
+            TimelineAbilityDefinition ability = instance.Timeline;
+            if (ability == null || !instance.HasNextStep)
+            {
+                ExpirePendingIntent(instance);
+                CompleteAbility(instance, AbilityStepTransitionReason.Completed);
+                return;
+            }
+
+            if (ability.StepAdvancement == AbilityStepAdvancement.Automatic)
+            {
+                AdvanceStep(instance, AbilityStepTransitionReason.AutomaticChain, default);
+                return;
+            }
+
+            // Last chance for a request that was queued before the window ever
+            // opened: the step is over, so the window will not open at all.
+            if (instance.HasPendingIntent)
+            {
+                AdvanceStep(
+                    instance,
+                    instance.Intent.IsLate
+                        ? AbilityStepTransitionReason.LateGraceIntent
+                        : AbilityStepTransitionReason.QueuedIntent,
+                    default);
+                return;
+            }
+
+            switch (ability.StepTimeoutPolicy)
+            {
+                case AbilityStepTimeoutPolicy.AdvanceStep:
+                    AdvanceStep(instance, AbilityStepTransitionReason.TimeoutAdvanced, default);
+                    return;
+                case AbilityStepTimeoutPolicy.CancelAbility:
+                    CancelAbilityInternal(
+                        instance,
+                        CommonGameplayTags.CancelStepTimeout,
+                        AbilityStepTransitionReason.TimeoutCancelled);
+                    return;
+                case AbilityStepTimeoutPolicy.HoldLastStep:
+                    instance.BeginHoldingLastStep();
+                    RaiseTransition(
+                        instance, AbilityStepTransitionReason.TimeoutHeld, instance.StepIndex);
+                    return;
+                default:
+                    CompleteAbility(instance, AbilityStepTransitionReason.TimeoutCompleted);
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Moves the activation on. The destination is the following step unless
+        /// a branch on the outgoing step names another one, so a branch and a
+        /// plain advance share one path and one set of side effects.
+        /// </summary>
+        private bool AdvanceStep(
+            AbilityInstance instance,
+            AbilityStepTransitionReason reason,
+            GameplayTag reasonTag)
+        {
+            AbilityDefinition ability = instance.Definition;
+
+            // Whatever carried the activation here, a request still waiting was
+            // spent doing it. Resolving in one place is what keeps "consumed
+            // exactly once" true for every advance path, timeouts included.
+            if (instance.TryResolveIntent(AbilityStepIntentStatus.Consumed))
+            {
+                StepIntentChanged?.Invoke(ability, instance.Intent);
+            }
+
+            int fromStepIndex = instance.StepIndex;
+            AbilityStep outgoingStep = instance.Step;
+            int targetIndex = fromStepIndex + 1;
+            if (outgoingStep != null)
+            {
+                int branched = outgoingStep.ResolveNextStepIndex(targetIndex, HasTag);
+                if (branched != targetIndex)
+                {
+                    targetIndex = branched;
+                    reason = AbilityStepTransitionReason.Branch;
+                }
+            }
+
+            if (!instance.TryMoveToStep(targetIndex, closedWindowTags))
+            {
+                return false;
+            }
+
+            // A window belongs to the step that authored it, so the outgoing
+            // step's tags come off before the next step's timeline starts.
+            ApplyTagWindowChanges();
+
+            AbilityStep step = instance.Step;
+            float stepApproachDistance = 0f;
+            if (step != null && step.TargetAssist != null)
+            {
+                AbilityTargetData stepTargets = ResolveTargetAssist(
+                    step.TargetAssist,
+                    instance.Context,
+                    out AbilityContext stepContext,
+                    out stepApproachDistance);
+                if (stepTargets != null)
+                {
+                    instance.Retarget(stepContext, stepTargets);
+                }
+                else if (!HasLiveTarget(instance) && ability.RequiresTarget)
+                {
+                    // The prelude found nothing and the activation has no target
+                    // left to fall back on, so the step cannot start. Ending here
+                    // is what keeps the ability from running on with no step.
+                    CancelAbilityInternal(
+                        instance,
+                        CommonGameplayTags.CancelTargetLost,
+                        AbilityStepTransitionReason.TargetingPreludeFailed);
+                    return false;
+                }
+            }
+
+            BeginStepDisplacement(instance, step, instance.Context, stepApproachDistance);
+            PlayStepAnimation(step);
+            instance.Timeline?.OnStepStarted(instance, instance.StepIndex);
+            RaiseTransition(instance, reason, fromStepIndex, reasonTag);
+            AbilityStepAdvanced?.Invoke(ability, instance.StepIndex);
+            AbilityPhaseChanged?.Invoke(ability, instance.CurrentPhase);
+            return true;
+        }
+
+        /// <summary>
+        /// True while the activation still holds a target that exists. A
+        /// destroyed <c>GameObject</c> compares equal to null through Unity's
+        /// lifetime check, which is exactly what has to be caught here.
+        /// </summary>
+        private static bool HasLiveTarget(AbilityInstance instance)
+        {
+            return instance.Context.Target != null;
+        }
+
+        /// <summary>
+        /// Retires a request the activation can no longer use, so every accepted
+        /// request ends either consumed or expired and never simply vanishes.
+        /// </summary>
+        private void ExpirePendingIntent(AbilityInstance instance)
+        {
+            if (!instance.TryResolveIntent(AbilityStepIntentStatus.Expired))
+            {
+                return;
+            }
+
+            StepIntentChanged?.Invoke(instance.Definition, instance.Intent);
+            RaiseTransition(
+                instance, AbilityStepTransitionReason.IntentExpired, instance.StepIndex);
+        }
+
+        private void RaiseTransition(
+            AbilityInstance instance,
+            AbilityStepTransitionReason reason,
+            int fromStepIndex)
+        {
+            RaiseTransition(instance, reason, fromStepIndex, default);
+        }
+
+        private void RaiseTransition(
+            AbilityInstance instance,
+            AbilityStepTransitionReason reason,
+            int fromStepIndex,
+            GameplayTag tag)
+        {
+            LastTransition = new AbilityStepTransition(
+                instance.Definition, reason, fromStepIndex, instance.StepIndex, tag);
+            // Starts and endings are recorded by the paths that own them, with
+            // the target and the cancel tag those paths know; what is left here
+            // is the movement inside a live activation.
+            if (AbilityDiagnostics.Enabled &&
+                reason != AbilityStepTransitionReason.Activated &&
+                activeInstances.Contains(instance))
+            {
+                Record(AbilityEvent.Transitioned(LastTransition));
+            }
+
+            StepTransitioned?.Invoke(LastTransition);
+        }
+
+        private AbilityInstance FindInstance(AbilityDefinition ability)
+        {
+            if (ability == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                if (activeInstances[i].Definition == ability)
+                {
+                    return activeInstances[i];
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Starts a task on the primary activation, which is where activation
+        /// work belongs: ending that activation ends the task with it.
+        /// </summary>
+        /// <returns>
+        /// The task, or null when nothing is running. A caller that needs the
+        /// work to happen regardless uses <see cref="RunActorTask{T}"/> and takes
+        /// responsibility for it having no activation to end it.
+        /// </returns>
+        public T RunTask<T>(T task) where T : AbilityTask
+        {
+            AbilityInstance instance = activeInstance;
+            if (instance == null || task == null)
+            {
+                return null;
+            }
+
+            WarnIfMovementHasNowhereToGo(task);
+            return instance.Tasks.Run(task, this, instance, gameObject);
+        }
+
+        /// <summary>
+        /// Starts a task on a named activation rather than the primary one,
+        /// for a consumer running several abilities at once.
+        /// </summary>
+        public T RunTask<T>(AbilityDefinition ability, T task) where T : AbilityTask
+        {
+            AbilityInstance instance = FindInstance(ability);
+            if (instance == null || task == null)
+            {
+                return null;
+            }
+
+            WarnIfMovementHasNowhereToGo(task);
+            return instance.Tasks.Run(task, this, instance, gameObject);
+        }
+
+        /// <summary>
+        /// Starts a task owned by the actor instead of by an activation. Reach
+        /// for it only when there genuinely is no owning activation — a hit
+        /// reaction landing while nothing is running — because an actor task is
+        /// released by the component, not by an ability ending.
+        /// </summary>
+        public T RunActorTask<T>(T task) where T : AbilityTask
+        {
+            WarnIfMovementHasNowhereToGo(task);
+            return actorTasks.Run(task, this, null, gameObject);
+        }
+
+        /// <summary>
+        /// A movement task on an actor with no motor runs its whole timeline and
+        /// travels nothing, which reads as a broken animation rather than as a
+        /// missing component. An authored displacement window is refused at
+        /// activation; a task started from code has no such gate, so it says so
+        /// once, when it starts.
+        /// </summary>
+        private void WarnIfMovementHasNowhereToGo(AbilityTask task)
+        {
+            if (task is AbilityMoveTask && !HasMotor)
+            {
+                Debug.LogError(
+                    $"'{name}' started {task.GetType().Name} with no IAbilityMotor " +
+                    "and no Rigidbody, so it will travel nothing.",
+                    this);
+            }
+        }
+
+        /// <summary>
+        /// Pushes the owner along a knockback vector, as a movement task.
+        ///
+        /// This is the target-owned half of knockback: the attacker effect says
+        /// how hard and how long, and the target decides here whether it moves
+        /// at all — immunity, armour, poise, blocking and death all get to
+        /// refuse before this is ever called. It replaces the per-consumer
+        /// FixedUpdate loops that each reimplemented the same push.
+        ///
+        /// The task is owned by the actor, not by whatever activation happens to
+        /// be running: a knockback is not part of the combo it interrupted, and
+        /// hanging it there would let that combo cancellation eat the push. A
+        /// hit-reaction ability that should own its own knockback — the design
+        /// the roadmap is heading for — runs the task itself with
+        /// <see cref="RunTask{T}(T)"/> and gets the activation lifetime with it.
+        /// </summary>
+        /// <returns>The task, or null when the hit carries no movement.</returns>
+        public ApplyKnockbackTask ApplyKnockback(
+            Vector3 velocity,
+            float durationSeconds,
+            GameObject source = null,
+            AbilityMovementDirectionPolicy directionPolicy =
+                AbilityMovementDirectionPolicy.Snapshot)
+        {
+            if (velocity.sqrMagnitude <= Mathf.Epsilon || durationSeconds <= 0f)
+            {
+                CancelKnockback();
+                return null;
+            }
+
+            // One knockback at a time: a second hit replaces the push instead of
+            // adding to it, which is what the consumer loops did by overwriting
+            // their velocity field.
+            CancelKnockback();
+            return actorTasks.Run(
+                new ApplyKnockbackTask(velocity, durationSeconds, source, directionPolicy),
+                this,
+                null,
+                gameObject);
+        }
+
+        /// <summary>
+        /// Stops any knockback immediately. Physics control taking over, a death,
+        /// or a teleport all need the push gone in the same frame rather than one
+        /// tick later.
+        /// </summary>
+        public void CancelKnockback()
+        {
+            CancelKnockbackIn(actorTasks);
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                CancelKnockbackIn(activeInstances[i].Tasks);
+            }
+        }
+
+        private static void CancelKnockbackIn(AbilityTaskScope scope)
+        {
+            IReadOnlyList<AbilityTask> scopeTasks = scope.Tasks;
+            for (int i = scopeTasks.Count - 1; i >= 0; i--)
+            {
+                if (scopeTasks[i] is ApplyKnockbackTask knockback && knockback.IsRunning)
+                {
+                    knockback.Cancel();
+                }
+            }
+
+            scope.PruneFinished();
+        }
+
+        /// <summary>
+        /// True while a knockback task is pushing the owner. Consumers read it to
+        /// keep their own locomotion out of the way.
+        /// </summary>
+        public bool IsKnockbackActive
+        {
+            get
+            {
+                if (HasRunningKnockback(actorTasks))
+                {
+                    return true;
+                }
+
+                for (int i = 0; i < activeInstances.Count; i++)
+                {
+                    if (HasRunningKnockback(activeInstances[i].Tasks))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        private static bool HasRunningKnockback(AbilityTaskScope scope)
+        {
+            IReadOnlyList<AbilityTask> scopeTasks = scope.Tasks;
+            for (int i = 0; i < scopeTasks.Count; i++)
+            {
+                if (scopeTasks[i] is ApplyKnockbackTask knockback && knockback.IsRunning)
+                {
+                    return true;
+                }
             }
 
             return false;
         }
 
-        public bool IsAwaitingSequenceAdvance =>
-            activeSequence != null && awaitingManualAdvance && activeInstance == null;
+        /// <summary>
+        /// Reports an input edge to the waiting tasks. Called by
+        /// <see cref="AbilityInputRouter"/> on both edges, so a task sees exactly
+        /// what the activation input policies see, and the core keeps knowing
+        /// nothing about the Input System.
+        /// </summary>
+        public void NotifyAbilityInput(AbilityInputEdge edge, AbilityDefinition source = null)
+        {
+            CollectTasksForNotification();
+            for (int i = 0; i < notifyBuffer.Count; i++)
+            {
+                if (notifyBuffer[i] is WaitInputTask wait)
+                {
+                    wait.NotifyInput(edge, source);
+                }
+            }
+
+            notifyBuffer.Clear();
+        }
+
+        /// <summary>
+        /// Reports a Unity Animation Event to the waiting tasks. Forwarded by
+        /// <see cref="AbilityAnimationEventBridge"/>.
+        /// </summary>
+        public void NotifyAnimationEvent(string eventName)
+        {
+            if (string.IsNullOrWhiteSpace(eventName))
+            {
+                return;
+            }
+
+            CollectTasksForNotification();
+            for (int i = 0; i < notifyBuffer.Count; i++)
+            {
+                if (notifyBuffer[i] is WaitAnimationEventTask wait)
+                {
+                    wait.NotifyAnimationEvent(eventName);
+                }
+            }
+
+            notifyBuffer.Clear();
+        }
+
+        private void NotifyGameplayEventTasks(GameplayTag eventTag, AbilityContext context)
+        {
+            CollectTasksForNotification();
+            for (int i = 0; i < notifyBuffer.Count; i++)
+            {
+                if (notifyBuffer[i] is WaitGameplayEventTask wait)
+                {
+                    wait.NotifyGameplayEvent(eventTag, context);
+                }
+            }
+
+            notifyBuffer.Clear();
+        }
+
+        /// <summary>
+        /// Snapshots every running task across every scope. A notified task may
+        /// succeed and start another, so the list it is read from cannot be the
+        /// live one.
+        /// </summary>
+        private void CollectTasksForNotification()
+        {
+            notifyBuffer.Clear();
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                AbilityTaskScope scope = activeInstances[i].Tasks;
+                notifyBuffer.AddRange(scope.Tasks);
+            }
+
+            notifyBuffer.AddRange(actorTasks.Tasks);
+        }
 
         public bool IsOnCooldown(AbilityDefinition ability)
         {
@@ -386,14 +1580,14 @@ namespace Fofuxo.GameplayAbilitySystem
                    cooldownEndTimes.TryGetValue(ability, out float endTime) &&
                    Time.time < endTime;
         }
-
-        public bool IsOnCooldown(AbilitySequenceDefinition sequence)
+        /// <returns>Seconds left on the cooldown, or zero when it is ready.</returns>
+        public float GetCooldownRemaining(AbilityDefinition ability)
         {
-            return sequence != null &&
-                   sequenceCooldownEndTimes.TryGetValue(sequence, out float endTime) &&
-                   Time.time < endTime;
+            return ability != null &&
+                   cooldownEndTimes.TryGetValue(ability, out float endTime)
+                ? Mathf.Max(0f, endTime - Time.time)
+                : 0f;
         }
-
         public bool HasTag(GameplayTag tag)
         {
             return !tag.IsEmpty &&
@@ -434,214 +1628,371 @@ namespace Fofuxo.GameplayAbilitySystem
                 return;
             }
 
-            GameplayCueTriggered?.Invoke(activeInstance?.Definition, cue, context);
-            ReplicationSink?.OnGameplayCue(cue, context);
+            Cues.Execute(GameplayCueParameters.ForContext(
+                cue, in context, activeInstance?.Definition));
         }
 
         /// <summary>
-        /// Applies a reactive effect outside the timeline (parry rewards,
-        /// cleanses). Runs with an ephemeral instance of the source ability,
-        /// so hit-dedup and scaling resolve exactly like triggered effects.
+        /// A step cue, with the outcome the step can vouch for: effects apply
+        /// before cues on the same frame, so whether anything was hit is known.
+        /// A step with no effect triggers has nothing to miss.
         /// </summary>
-        public void ApplyReactiveEffect(
-            AbilityEffectDefinition effect,
-            AbilityDefinition source,
-            AbilityContext context)
+        private void RaiseStepCue(AbilityInstance instance, in GameplayCueTrigger trigger)
         {
-            if (effect == null || source == null)
+            bool landed = instance.Step == null ||
+                          instance.Step.EffectTriggers.Count == 0 ||
+                          instance.HasRegisteredHitOnStep(instance.StepIndex);
+            if (!landed && trigger.SuppressOnMiss)
             {
                 return;
             }
 
-            effect.Apply(new AbilityEffectContext(this, new AbilityInstance(source, context), -1));
+            Cues.Execute(GameplayCueParameters.ForAbility(
+                trigger.Cue,
+                instance,
+                gameObject,
+                landed ? GameplayCueOutcome.Landed : GameplayCueOutcome.Missed));
         }
 
         /// <summary>
-        /// Resolves the nested prelude of an activation: currently target
-        /// assist (query enemies around the context direction, snap the owner,
-        /// propagate the target, and calculate startup approach). Selection is
-        /// instant and tagless; the parent keeps owning the timeline, movement,
-        /// cooldown, and animation.
+        /// Every cue event this actor raises passes here once: into the history,
+        /// out through the event, and - for what a netcode layer would forward -
+        /// to the replication sink.
         /// </summary>
-        private static AbilityContext ResolveNestedAssist(
-            AbilityDefinition ability,
-            AbilityContext context,
-            out float approachDistance)
+        private void OnCueRaised(GameplayCueParameters parameters)
         {
-            approachDistance = 0f;
-            TargetAssistDefinition assist = ability.NestedAssist;
-            GameObject owner = context.Owner;
-            if (assist == null || owner == null)
+            if (AbilityDiagnostics.Enabled)
             {
-                return context;
+                Record(AbilityEvent.Cue(
+                    parameters.Ability,
+                    parameters.Cue,
+                    DescribeCueEvent(parameters.Event, parameters.Outcome)));
             }
 
-            int layers = assist.TargetLayerMask;
-            if (layers == 0)
+            GameplayCueTriggered?.Invoke(parameters);
+            if (parameters.Event == GameplayCueEvent.Execute ||
+                parameters.Event == GameplayCueEvent.Add)
             {
-                return context;
+                ReplicationSink?.OnGameplayCue(parameters.Cue, parameters.Context);
             }
-
-            float distance = assist.ResolveSearchDistance();
-            if (distance <= Mathf.Epsilon)
-            {
-                return context;
-            }
-
-            float cone = Mathf.Clamp(assist.ConeHalfAngle, 0f, 90f);
-            Vector3 facing = context.Direction;
-            if (facing.sqrMagnitude <= Mathf.Epsilon)
-            {
-                facing = owner.transform.forward;
-            }
-
-            int candidateCount = Physics.OverlapSphereNonAlloc(
-                owner.transform.position,
-                distance,
-                AssistTargetBuffer,
-                layers,
-                QueryTriggerInteraction.Collide);
-
-            float bestScore = float.PositiveInfinity;
-            Vector3 bestDirection = Vector3.zero;
-            float bestDistance = 0f;
-            Component bestReceiver = null;
-            for (int i = 0; i < candidateCount; i++)
-            {
-                Collider candidate = AssistTargetBuffer[i];
-                if (candidate == null ||
-                    candidate.gameObject == owner ||
-                    candidate.transform.IsChildOf(owner.transform) ||
-                    !candidate.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                if (!TryGetAssistDirection(owner, candidate, out Vector3 candidateDirection, out float candidateDistance))
-                {
-                    continue;
-                }
-
-                if (candidate.GetComponentInParent<IAbilityDamageReceiver>() is not IAbilityDamageReceiver receiver ||
-                    receiver is not Component receiverComponent ||
-                    !receiver.IsDamageable)
-                {
-                    continue;
-                }
-
-                float inputAngle = Vector3.Angle(facing, candidateDirection);
-                if (candidateDistance > assist.ProximityRadius && inputAngle > cone)
-                {
-                    continue;
-                }
-
-                float score = candidateDistance + inputAngle * 0.02f;
-                if (score >= bestScore)
-                {
-                    continue;
-                }
-
-                bestScore = score;
-                bestDirection = candidateDirection;
-                bestDistance = candidateDistance;
-                bestReceiver = receiverComponent;
-            }
-
-            if (bestDirection.sqrMagnitude <= Mathf.Epsilon || bestReceiver == null)
-            {
-                return context;
-            }
-
-            owner.transform.rotation = Quaternion.LookRotation(bestDirection, Vector3.up);
-            if (assist.ApproachTarget)
-            {
-                float stoppingDistance = assist.ResolveStoppingDistance();
-                approachDistance = Mathf.Max(0f, bestDistance - stoppingDistance);
-            }
-
-            GameObject target = bestReceiver.gameObject;
-            return new AbilityContext(
-                owner,
-                target,
-                bestDirection,
-                target.transform.position);
         }
 
-        private static bool TryGetAssistDirection(
-            GameObject owner,
-            Collider targetCollider,
-            out Vector3 targetDirection,
-            out float targetDistance)
+        private static string DescribeCueEvent(GameplayCueEvent cueEvent, GameplayCueOutcome outcome)
         {
-            targetDirection = Vector3.zero;
-            targetDistance = 0f;
-
-            Vector3 closestPoint = targetCollider.ClosestPoint(owner.transform.position);
-            Vector3 planarDirection = Vector3.ProjectOnPlane(
-                closestPoint - owner.transform.position,
-                Vector3.up);
-            if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
+            switch (cueEvent)
             {
-                planarDirection = Vector3.ProjectOnPlane(
-                    targetCollider.bounds.center - owner.transform.position,
-                    Vector3.up);
+                case GameplayCueEvent.Add: return "add";
+                case GameplayCueEvent.WhileActive: return "while active";
+                case GameplayCueEvent.Remove: return "remove";
+                default:
+                    switch (outcome)
+                    {
+                        case GameplayCueOutcome.Missed: return "execute (missed)";
+                        case GameplayCueOutcome.Blocked: return "execute (blocked)";
+                        case GameplayCueOutcome.Immune: return "execute (immune)";
+                        case GameplayCueOutcome.Parried: return "execute (parried)";
+                        default: return "execute";
+                    }
+            }
+        }
+
+        /// <summary>
+        /// Applies an effect outside the ability timeline: parry rewards,
+        /// cleanses, anything a consumer applies directly. The application
+        /// context is the spec, not an activation — the ephemeral
+        /// <see cref="AbilityInstance"/> this used to fabricate owned a task
+        /// scope nothing would ever cancel.
+        /// </summary>
+        /// <returns>How many targets accepted the effect.</returns>
+        public int ApplyGameplayEffect(
+            GameplayEffectDefinition effect,
+            AbilityContext context,
+            AbilityDefinition source = null,
+            int level = 1)
+        {
+            if (effect == null)
+            {
+                return 0;
             }
 
-            if (planarDirection.sqrMagnitude <= Mathf.Epsilon)
+            return effect.ApplyFrom(
+                new GameplayEffectContext(this, in context, source, level));
+        }
+
+        /// <summary>
+        /// Effect-granted tags, refcounted alongside the ability-granted ones so
+        /// <see cref="HasTag"/> answers for both. Called by the actor
+        /// <see cref="GameplayEffectContainer"/>, which owns their lifetime.
+        /// </summary>
+        internal void AddEffectTag(GameplayTag tag)
+        {
+            AddTagInstance(tag);
+        }
+
+        internal void RemoveEffectTag(GameplayTag tag)
+        {
+            RemoveTagInstance(tag);
+        }
+
+        // ----------------------------------------------------------- diagnostics
+
+        /// <summary>
+        /// Puts one event in this actor's history and tells the diagnostics
+        /// listeners. Nothing happens while diagnostics are off — not even the
+        /// ring is created — which is what keeps a release player free of it.
+        /// Callers that would have to build a message first check
+        /// <see cref="AbilityDiagnostics.Enabled"/> themselves.
+        /// </summary>
+        internal void Record(in AbilityEvent recorded)
+        {
+            if (!AbilityDiagnostics.Enabled)
+            {
+                return;
+            }
+
+            History.Record(in recorded);
+            AbilityDiagnostics.Raise(this, in recorded);
+        }
+
+        /// <summary>
+        /// The refusal that used to vanish. Only an *attempt* is recorded:
+        /// <see cref="EvaluateActivation"/> and <see cref="CanActivate"/> are
+        /// questions, asked by AI scoring every frame, and stay side-effect
+        /// free — the history would otherwise be nothing but them.
+        /// </summary>
+        private void RecordRejection(AbilityDefinition ability, in AbilityActivationResult result)
+        {
+            if (AbilityDiagnostics.Enabled)
+            {
+                Record(AbilityEvent.Rejected(ability, in result));
+            }
+        }
+
+        /// <summary>
+        /// Resolves the targeting prelude of an activation: acquire candidates
+        /// around the context direction, snap the owner, propagate the chosen
+        /// target, and calculate startup approach. Selection is instant and
+        /// tagless; the ability keeps owning the timeline, movement, cooldown
+        /// and animation.
+        ///
+        /// The assist produces <see cref="AbilityTargetData"/>. Everything the
+        /// activation then knows about its target — the context actor, the
+        /// facing, the approach — is read off that one result instead of being
+        /// written into the context field by field.
+        /// </summary>
+        /// <returns>
+        /// The acquisition, or null when the assist selected nothing and the
+        /// context has to stay as it was.
+        /// </returns>
+        private AbilityTargetData ResolveTargetAssist(
+            TargetAssistDefinition assist,
+            AbilityContext context,
+            out AbilityContext resolvedContext,
+            out float approachDistance)
+        {
+            resolvedContext = context;
+            approachDistance = 0f;
+            GameObject owner = context.Owner;
+            if (assist == null || owner == null || !assist.HasQuery)
+            {
+                return null;
+            }
+
+            Vector3 facing = context.Direction.sqrMagnitude > Mathf.Epsilon
+                ? context.Direction
+                : owner.transform.forward;
+            assist.BuildQuery().Resolve(
+                owner,
+                owner.transform.position,
+                facing,
+                assistTargets);
+
+            if (!TrySelectAssistTarget(assist, context, out AbilityTargetHit selected))
+            {
+                return null;
+            }
+
+            owner.transform.rotation = Quaternion.LookRotation(selected.Direction, Vector3.up);
+            if (assist.ApproachTarget)
+            {
+                // The hit distance runs from the owner's origin to the target's
+                // surface, so the owner's own half has to come off it before the
+                // authored gap means the space left between the two bodies.
+                approachDistance = Mathf.Max(
+                    0f,
+                    selected.Distance -
+                    ResolveOwnerExtent(owner, selected.Direction) -
+                    assist.ResolveStoppingGap());
+            }
+
+            GameObject target = selected.Actor;
+            resolvedContext = new AbilityContext(
+                owner,
+                target,
+                selected.Direction,
+                target.transform.position);
+            return assistTargets;
+        }
+
+        /// <summary>
+        /// Applies the assist's lock policy to the acquisition. The default
+        /// re-acquires every time, which is what a combo that should follow
+        /// whoever is in front of the owner needs; the other two keep the
+        /// activation committed to the enemy it started on.
+        /// </summary>
+        private bool TrySelectAssistTarget(
+            TargetAssistDefinition assist,
+            AbilityContext context,
+            out AbilityTargetHit selected)
+        {
+            selected = default;
+            GameObject held = context.Target;
+            if (held != null && assist.LockPolicy != AbilityTargetLockPolicy.Reacquire)
+            {
+                for (int i = 0; i < assistTargets.Count; i++)
+                {
+                    if (assistTargets[i].Actor == held)
+                    {
+                        selected = assistTargets[i];
+                        return true;
+                    }
+                }
+
+                if (assist.LockPolicy == AbilityTargetLockPolicy.Lock)
+                {
+                    // Out of the query but still alive: the lock follows it, so
+                    // the owner keeps turning toward a target that stepped away.
+                    return TryDescribeHeldTarget(context.Owner, held, out selected);
+                }
+            }
+
+            if (!assistTargets.HasTargets)
             {
                 return false;
             }
 
-            targetDistance = planarDirection.magnitude;
-            targetDirection = planarDirection / targetDistance;
+            selected = assistTargets.Primary;
+            return selected.Direction.sqrMagnitude > Mathf.Epsilon;
+        }
+
+        /// <summary>
+        /// Rebuilds a hit for a locked target the query no longer reaches, from
+        /// its transform alone. Distance is measured to its collider surface
+        /// when it has one, so the approach still stops at the authored gap.
+        /// </summary>
+        private static bool TryDescribeHeldTarget(
+            GameObject owner,
+            GameObject held,
+            out AbilityTargetHit hit)
+        {
+            hit = default;
+            if (owner == null || held == null)
+            {
+                return false;
+            }
+
+            Collider collider = held.GetComponentInChildren<Collider>();
+            Vector3 origin = owner.transform.position;
+            Vector3 point = collider != null
+                ? collider.ClosestPoint(origin)
+                : held.transform.position;
+            Vector3 planar = Vector3.ProjectOnPlane(point - origin, Vector3.up);
+            if (planar.sqrMagnitude <= Mathf.Epsilon)
+            {
+                planar = Vector3.ProjectOnPlane(
+                    held.transform.position - origin, Vector3.up);
+            }
+
+            float distance = planar.magnitude;
+            if (distance <= Mathf.Epsilon)
+            {
+                return false;
+            }
+
+            Vector3 direction = planar / distance;
+            hit = new AbilityTargetHit(
+                held,
+                collider,
+                point,
+                -direction,
+                direction,
+                distance);
             return true;
         }
 
-        private bool CanActivateInternal(
+        /// <summary>
+        /// How far the owner's own body reaches along the approach direction,
+        /// measured from its colliders rather than assumed. Without it the
+        /// authored gap would be measured from the owner's origin, and a wide
+        /// character would stop with its body still half a metre short.
+        /// </summary>
+        private float ResolveOwnerExtent(GameObject owner, Vector3 direction)
+        {
+            ownerColliders ??= GetComponentsInChildren<Collider>(true);
+            return AbilityBodyExtent.Resolve(
+                owner.transform.position, ownerColliders, direction);
+        }
+
+        /// <summary>
+        /// The activation checks, in one place, producing the typed rejection
+        /// code and the message together so the two can never disagree. Side
+        /// effect free: nothing here may mutate runtime state or the definition.
+        /// </summary>
+        /// <param name="skipExclusion">
+        /// Leaves out the mutual-exclusion rule, for a caller that is about to
+        /// clear the way itself and needs to know whether the activation would
+        /// be legal once it has. Every other rule still runs, against the world
+        /// as it stands right now.
+        /// </param>
+        private AbilityActivationResult EvaluateActivationInternal(
             AbilityDefinition ability,
             AbilityContext context,
-            bool isSequenceStep,
-            out string rejectionReason)
+            bool skipExclusion = false)
         {
             if (ability == null)
             {
-                rejectionReason = "Ability is null.";
-                return false;
+                return Reject(AbilityActivationRejection.NullAbility, "Ability is null.");
             }
 
-            if (!ability.TryValidate(out rejectionReason))
+            if (!ability.TryValidate(out string validationError))
             {
-                return false;
+                return Reject(AbilityActivationRejection.InvalidDefinition, validationError);
             }
 
-            if (activeInstance != null)
+            AbilityActivationResult exclusion =
+                skipExclusion ? AbilityActivationResult.Accepted : EvaluateExclusion(ability);
+            if (!exclusion.IsAccepted)
             {
-                rejectionReason = "Another ability is active.";
-                return false;
+                return exclusion;
             }
 
-            if (!isSequenceStep && IsAwaitingSequenceAdvance)
+            if (loadout == null || !loadout.Contains(ability))
             {
-                rejectionReason = "A sequence is waiting for manual advance.";
-                return false;
+                return Reject(
+                    AbilityActivationRejection.NotGranted,
+                    "Ability is not granted by the current loadout.");
             }
 
-            if (!isSequenceStep && (loadout == null || !loadout.Contains(ability)))
+            // The asset cannot check this: whether a displacement window has
+            // anywhere to travel is a fact about the actor, not about the
+            // ability, so it is decided here and only here.
+            if (ability.RequiresMotor && !HasMotor)
             {
-                rejectionReason = "Ability is not granted by the current loadout.";
-                return false;
+                return Reject(
+                    AbilityActivationRejection.MissingMotor,
+                    "The ability moves the owner, and the owner has no IAbilityMotor " +
+                    "and no Rigidbody for movement to reach the world through.");
             }
 
             if (IsOnCooldown(ability))
             {
-                rejectionReason = "Ability is on cooldown.";
-                return false;
+                return Reject(AbilityActivationRejection.OnCooldown, "Ability is on cooldown.");
             }
 
             if (ability.HasLimitedCharges && GetCharges(ability) < 1f)
             {
-                rejectionReason = "Ability has no charges left.";
-                return false;
+                return Reject(
+                    AbilityActivationRejection.NoChargesLeft, "Ability has no charges left.");
             }
 
             AttributeSet attributeSet =
@@ -650,8 +2001,9 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 if (attributeSet == null || attributeSet.GetCurrent(cost.Attribute) < cost.Amount)
                 {
-                    rejectionReason = $"Insufficient attribute for cost: {cost.Attribute}.";
-                    return false;
+                    return Reject(
+                        AbilityActivationRejection.InsufficientAttribute,
+                        $"Insufficient attribute for cost: {cost.Attribute}.");
                 }
             }
 
@@ -659,8 +2011,9 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 if (!HasTag(requiredTag))
                 {
-                    rejectionReason = $"Required tag is missing: {requiredTag}.";
-                    return false;
+                    return Reject(
+                        AbilityActivationRejection.MissingRequiredTag,
+                        $"Required tag is missing: {requiredTag}.");
                 }
             }
 
@@ -668,15 +2021,16 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 if (HasTag(blockedTag))
                 {
-                    rejectionReason = $"Activation is blocked by tag: {blockedTag}.";
-                    return false;
+                    return Reject(
+                        AbilityActivationRejection.BlockedByTag,
+                        $"Activation is blocked by tag: {blockedTag}.");
                 }
             }
 
             if (ability.RequiresTarget && context.Target == null)
             {
-                rejectionReason = "Ability requires a target.";
-                return false;
+                return Reject(
+                    AbilityActivationRejection.MissingTarget, "Ability requires a target.");
             }
 
             if (context.Owner != null && context.Target != null)
@@ -687,8 +2041,9 @@ namespace Fofuxo.GameplayAbilitySystem
                 float distance = targetDirection.magnitude;
                 if (distance < ability.MinimumRange || distance > ability.MaximumRange)
                 {
-                    rejectionReason = "Target is outside the configured range.";
-                    return false;
+                    return Reject(
+                        AbilityActivationRejection.OutOfRange,
+                        "Target is outside the configured range.");
                 }
 
                 if (targetDirection.sqrMagnitude > Mathf.Epsilon)
@@ -698,26 +2053,166 @@ namespace Fofuxo.GameplayAbilitySystem
                         targetDirection.normalized);
                     if (angle > ability.MaximumFacingAngle)
                     {
-                        rejectionReason = "Target is outside the configured facing angle.";
-                        return false;
+                        return Reject(
+                            AbilityActivationRejection.OutsideFacingAngle,
+                            "Target is outside the configured facing angle.");
                     }
                 }
             }
 
-            rejectionReason = string.Empty;
-            return true;
+            return AbilityActivationResult.Accepted;
         }
 
-        private bool ActivateInternal(AbilityDefinition ability, AbilityContext context)
+        private static AbilityActivationResult Reject(
+            AbilityActivationRejection rejection, string message)
         {
-            AbilityContext resolvedContext = ResolveNestedAssist(
-                ability,
-                context,
-                out float assistApproachDistance);
-            activeInstance = new AbilityInstance(ability, resolvedContext);
-            BeginInstanceDisplacement(
-                activeInstance,
-                ability,
+            return AbilityActivationResult.Rejected(rejection, message);
+        }
+
+        /// <summary>
+        /// Whether the abilities already running let this one start. Side effect
+        /// free, like every other activation check: a policy that cancels is
+        /// only asked here whether it *could*, and does the cancelling in
+        /// <see cref="ActivateInternal"/>.
+        /// </summary>
+        private AbilityActivationResult EvaluateExclusion(AbilityDefinition ability)
+        {
+            if (activeInstances.Count == 0)
+            {
+                return AbilityActivationResult.Accepted;
+            }
+
+            // One activation per ability, whatever the policy: a second one would
+            // pay the cost and grant the tags again while the first still holds
+            // them, and the singular accessors could not tell them apart.
+            if (FindInstance(ability) != null)
+            {
+                return Reject(
+                    AbilityActivationRejection.AnotherAbilityActive,
+                    "This ability is already active.");
+            }
+
+            switch (ability.GroupExclusionPolicy)
+            {
+                case AbilityGroupExclusionPolicy.BlockWhileSameGroupActive:
+                    for (int i = 0; i < activeInstances.Count; i++)
+                    {
+                        AbilityDefinition running = activeInstances[i].Definition;
+                        if (ability.SharesGroupWith(running))
+                        {
+                            return Reject(
+                                AbilityActivationRejection.BlockedByGroup,
+                                $"Group '{ability.GroupTag}' is held by " +
+                                $"'{running.AbilityId}'.");
+                        }
+                    }
+
+                    return AbilityActivationResult.Accepted;
+
+                case AbilityGroupExclusionPolicy.CancelSameGroup:
+                case AbilityGroupExclusionPolicy.CancelAnyActive:
+                    bool sameGroupOnly =
+                        ability.GroupExclusionPolicy ==
+                        AbilityGroupExclusionPolicy.CancelSameGroup;
+                    for (int i = 0; i < activeInstances.Count; i++)
+                    {
+                        AbilityDefinition running = activeInstances[i].Definition;
+                        if (sameGroupOnly && !ability.SharesGroupWith(running))
+                        {
+                            continue;
+                        }
+
+                        if (!running.CanBeCancelledBy(CommonGameplayTags.CancelSuperseded))
+                        {
+                            return Reject(
+                                AbilityActivationRejection.BlockedByUncancellableAbility,
+                                $"'{running.AbilityId}' refuses to be cancelled.");
+                        }
+                    }
+
+                    return AbilityActivationResult.Accepted;
+
+                default:
+                    return Reject(
+                        AbilityActivationRejection.AnotherAbilityActive,
+                        "Another ability is active.");
+            }
+        }
+
+        /// <summary>
+        /// Clears the way for an activation whose policy cancels instead of
+        /// blocking. <see cref="EvaluateExclusion"/> has already established
+        /// that every ability here accepts the request.
+        /// </summary>
+        private void CancelSupersededAbilities(AbilityDefinition ability)
+        {
+            AbilityGroupExclusionPolicy policy = ability.GroupExclusionPolicy;
+            if (policy != AbilityGroupExclusionPolicy.CancelSameGroup &&
+                policy != AbilityGroupExclusionPolicy.CancelAnyActive)
+            {
+                return;
+            }
+
+            bool sameGroupOnly = policy == AbilityGroupExclusionPolicy.CancelSameGroup;
+            supersededBuffer.Clear();
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                AbilityInstance instance = activeInstances[i];
+                if (sameGroupOnly && !ability.SharesGroupWith(instance.Definition))
+                {
+                    continue;
+                }
+
+                supersededBuffer.Add(instance);
+            }
+
+            for (int i = 0; i < supersededBuffer.Count; i++)
+            {
+                ForceCancelAbility(
+                    supersededBuffer[i], CommonGameplayTags.CancelSuperseded);
+            }
+
+            supersededBuffer.Clear();
+        }
+
+        private bool ActivateInternal(
+            AbilityDefinition ability,
+            AbilityContext context,
+            AbilityTargetData suppliedTargets,
+            GameplayEffectSpec cause)
+        {
+            // Nothing before this point mutates state, so a policy that cancels
+            // its way in only takes effect once the activation is certain.
+            CancelSupersededAbilities(ability);
+
+            AbilityContext resolvedContext = context;
+            float assistApproachDistance = 0f;
+            AbilityTargetData resolvedTargets = suppliedTargets;
+            if (suppliedTargets == null)
+            {
+                AbilityStep firstStep = (ability as TimelineAbilityDefinition)?.FirstStep;
+                TargetAssistDefinition activationAssist =
+                    firstStep != null && firstStep.TargetAssist != null
+                        ? firstStep.TargetAssist
+                        : ability.TargetAssist;
+                resolvedTargets = ResolveTargetAssist(
+                    activationAssist,
+                    context,
+                    out resolvedContext,
+                    out assistApproachDistance);
+            }
+            else if (context.Target == null && suppliedTargets.PrimaryActor != null)
+            {
+                resolvedContext = AbilityContext.FromTarget(
+                    context.Owner, suppliedTargets.PrimaryActor);
+            }
+
+            var instance = new AbilityInstance(ability, resolvedContext, this, cause);
+            activeInstances.Add(instance);
+            instance.AdoptTargets(resolvedTargets);
+            BeginStepDisplacement(
+                instance,
+                instance.Step,
                 resolvedContext,
                 assistApproachDistance);
             AddGrantedTags(ability);
@@ -729,155 +2224,188 @@ namespace Fofuxo.GameplayAbilitySystem
                 StartCooldown(ability);
             }
 
-            PlayAbilityAnimation(ability);
+            PlayStepAnimation(instance.Step);
+            ability.OnActivated(instance);
+            // No timeline, no step to have started. An ability without one
+            // hears OnActivated and nothing else until it ends.
+            instance.Timeline?.OnStepStarted(instance, instance.StepIndex);
+
+            RaiseTransition(instance, AbilityStepTransitionReason.Activated, instance.StepIndex);
+            if (AbilityDiagnostics.Enabled)
+            {
+                Record(AbilityEvent.Started(ability, instance.StepIndex, resolvedContext.Target));
+            }
+
             AbilityStarted?.Invoke(ability);
-            AbilityPhaseChanged?.Invoke(ability, activeInstance.CurrentPhase);
+            AbilityPhaseChanged?.Invoke(ability, instance.CurrentPhase);
             ReplicationSink?.OnAbilityActivated(ability, resolvedContext);
             return true;
         }
 
-        private void CompleteActiveAbility()
+        /// <summary>
+        /// The one teardown both endings share. Anything an activation holds —
+        /// tag windows, granted tags, a pending advance request, the animation,
+        /// its slot in the running list — is released here, so a new ending can
+        /// never forget half of it.
+        /// </summary>
+        private AbilityContext EndActivation(
+            AbilityInstance instance,
+            bool cancelled,
+            GameplayTag cancelTag,
+            AbilityStepTransitionReason reason)
         {
-            AbilityDefinition completedAbility = activeInstance.Definition;
-            AbilityContext completedContext = activeInstance.Context;
-            bool hitAnything = activeInstance.RegisteredHitCount > 0;
-            bool tracksHits = completedAbility.EffectTriggers.Count > 0;
-            RemoveGrantedTags(completedAbility);
-            activeInstance = null;
-            StopAbilityAnimation(completedAbility);
+            AbilityDefinition ability = instance.Definition;
+            AbilityContext endedContext = instance.Context;
+            // Tasks come off first, before any hook runs. A movement task that
+            // survived one line past this point would tick again on an ended
+            // activation, which is precisely what a cancellation must not do.
+            instance.CancelTasks();
+            ExpirePendingIntent(instance);
+            instance.CloseTagWindows(closedWindowTags);
+            ApplyTagWindowChanges();
+            RemoveGrantedTags(ability);
+
+            // The hook runs while the activation is still the running one and
+            // after its tags have come off, which is the order derived abilities
+            // were written against.
+            if (cancelled)
+            {
+                ability.OnCancelled(instance, cancelTag);
+            }
+            else
+            {
+                ability.OnCompleted(instance);
+            }
+
+            activeInstances.Remove(instance);
+            RaiseTransition(instance, reason, instance.StepIndex, cancelTag);
+            StopAbilityAnimation(ability);
+            return endedContext;
+        }
+
+        private void CompleteAbility(
+            AbilityInstance instance, AbilityStepTransitionReason reason)
+        {
+            AbilityDefinition completedAbility = instance.Definition;
+            bool hitAnything = instance.RegisteredHitCount > 0;
+            AbilityStep completedStep = instance.Step;
+            bool tracksHits = completedStep != null && completedStep.EffectTriggers.Count > 0;
+            AbilityContext completedContext =
+                EndActivation(instance, false, default, reason);
 
             if (completedAbility.CooldownStartPolicy == AbilityCooldownStartPolicy.OnCompletion)
             {
                 StartCooldown(completedAbility);
             }
 
+            if (AbilityDiagnostics.Enabled)
+            {
+                Record(AbilityEvent.Completed(completedAbility, instance.StepIndex, reason));
+            }
+
             AbilityCompleted?.Invoke(completedAbility);
             ReplicationSink?.OnAbilityEnded(completedAbility, completedContext, true);
             if (tracksHits && !hitAnything)
             {
+                if (AbilityDiagnostics.Enabled)
+                {
+                    Record(AbilityEvent.Whiffed(completedAbility));
+                }
+
                 AbilityWhiffed?.Invoke(completedAbility, completedContext);
             }
-
-            if (activeSequence == null)
-            {
-                return;
-            }
-
-            activeSequenceStep++;
-            if (activeSequenceStep < activeSequence.Steps.Count)
-            {
-                if (activeSequence.Advancement == SequenceAdvancement.Manual)
-                {
-                    if (completedAbility.ComboInputEndFrame > 0 &&
-                        !queuedSequenceAdvance)
-                    {
-                        CancelSequenceOnly(AbilityCancelReason.Manual);
-                        return;
-                    }
-
-                    awaitingManualAdvance = true;
-                    manualAdvanceDeadline = activeSequence.ManualAdvanceWindow > 0f
-                        ? Time.time + activeSequence.ManualAdvanceWindow
-                        : float.PositiveInfinity;
-                    SequenceAwaitingAdvance?.Invoke(activeSequence, activeSequenceStep);
-                    if (queuedSequenceAdvance)
-                    {
-                        queuedSequenceAdvance = false;
-                        TryAdvanceSequence();
-                    }
-                    return;
-                }
-
-                AbilityDefinition nextStep = activeSequence.Steps[activeSequenceStep];
-                if (CanActivateInternal(nextStep, activeSequenceContext, true, out _) &&
-                    ActivateInternal(nextStep, activeSequenceContext))
-                {
-                    return;
-                }
-
-                CancelSequenceOnly(AbilityCancelReason.Manual);
-                return;
-            }
-
-            AbilitySequenceDefinition completedSequence = activeSequence;
-            if (completedSequence.Cooldown > 0f)
-            {
-                sequenceCooldownEndTimes[completedSequence] =
-                    Time.time + completedSequence.Cooldown;
-            }
-
-            ClearActiveSequence();
-            SequenceCompleted?.Invoke(completedSequence);
         }
 
-        private void CancelActiveAbilityInternal(AbilityCancelReason reason)
+        private void CancelAbilityInternal(
+            AbilityInstance instance,
+            GameplayTag cancelTag,
+            AbilityStepTransitionReason reason)
         {
-            AbilityDefinition cancelledAbility = activeInstance.Definition;
-            AbilityContext cancelledContext = activeInstance.Context;
-            RemoveGrantedTags(cancelledAbility);
-            activeInstance = null;
-            StopAbilityAnimation(cancelledAbility);
-            AbilityCancelled?.Invoke(cancelledAbility, reason);
+            AbilityDefinition cancelledAbility = instance.Definition;
+            AbilityContext cancelledContext =
+                EndActivation(instance, true, cancelTag, reason);
+            if (AbilityDiagnostics.Enabled)
+            {
+                Record(AbilityEvent.Cancelled(
+                    cancelledAbility, instance.StepIndex, cancelTag, reason));
+            }
+
+            AbilityCancelled?.Invoke(cancelledAbility, cancelTag);
             ReplicationSink?.OnAbilityEnded(cancelledAbility, cancelledContext, false);
-
-            if (activeSequence != null)
-            {
-                CancelSequenceOnly(reason);
-            }
         }
 
-        private void CancelSequenceOnly(AbilityCancelReason reason)
+        /// <summary>
+        /// Seconds already counted towards each ability's next charge. Read by
+        /// <see cref="AbilityPersistence"/>; the system owns the timers.
+        /// </summary>
+        internal IReadOnlyDictionary<AbilityDefinition, float> ChargeRestoreElapsed =>
+            chargeRestoreTimers;
+
+        /// <summary>
+        /// The tags set from outside the ability system, as opposed to the ones
+        /// an ability or an effect grants while it lives. Only these are worth
+        /// saving: the rest come back with what granted them.
+        /// </summary>
+        internal IReadOnlyCollection<GameplayTag> LooseTags => looseTags;
+
+        /// <summary>
+        /// Puts an ability back on cooldown with the remaining time a record
+        /// carried. Zero or less clears it.
+        /// </summary>
+        internal void RestoreCooldown(AbilityDefinition ability, float remainingSeconds)
         {
-            AbilitySequenceDefinition cancelledSequence = activeSequence;
-            ClearActiveSequence();
-            SequenceCancelled?.Invoke(cancelledSequence, reason);
-        }
-
-        private void ClearActiveSequence()
-        {
-            activeSequence = null;
-            activeSequenceContext = default;
-            activeSequenceStep = 0;
-            awaitingManualAdvance = false;
-            queuedSequenceAdvance = false;
-            manualAdvanceDeadline = 0f;
-        }
-
-        private bool TryProcessQueuedSequenceAdvance()
-        {
-            if (!queuedSequenceAdvance ||
-                activeSequence == null ||
-                activeInstance == null ||
-                activeSequence.Advancement != SequenceAdvancement.Manual)
-            {
-                return false;
-            }
-
-            int continuationFrame = activeInstance.Definition.ComboContinuationFrame;
-            if (continuationFrame == 0 || ActiveFrame < continuationFrame)
-            {
-                return false;
-            }
-
-            AbilityInstance completedInstance = activeInstance;
-            CompleteActiveAbility();
-            return activeInstance != completedInstance;
-        }
-
-        private void ExpireSequenceInputWindow()
-        {
-            if (queuedSequenceAdvance ||
-                activeSequence == null ||
-                activeInstance == null ||
-                activeSequence.Advancement != SequenceAdvancement.Manual)
+            if (ability == null)
             {
                 return;
             }
 
-            int inputEndFrame = activeInstance.Definition.ComboInputEndFrame;
-            if (inputEndFrame > 0 && ActiveFrame > inputEndFrame)
+            if (remainingSeconds <= 0f)
             {
-                CancelSequenceOnly(AbilityCancelReason.Manual);
+                cooldownEndTimes.Remove(ability);
+                return;
+            }
+
+            cooldownEndTimes[ability] = Time.time + remainingSeconds;
+        }
+
+        /// <summary>
+        /// Puts a charge pool back. A full pool is stored as no entry at all,
+        /// which is the same shape <see cref="TickChargeRestore"/> leaves
+        /// behind once an ability has recharged.
+        /// </summary>
+        internal void RestoreCharges(
+            AbilityDefinition ability, float remaining, float restoreElapsed)
+        {
+            if (ability == null || !ability.HasLimitedCharges)
+            {
+                return;
+            }
+
+            float clamped = Mathf.Clamp(remaining, 0f, ability.MaxCharges);
+            if (clamped >= ability.MaxCharges)
+            {
+                charges.Remove(ability);
+                chargeRestoreTimers.Remove(ability);
+                return;
+            }
+
+            charges[ability] = clamped;
+            chargeRestoreTimers[ability] = Mathf.Max(0f, restoreElapsed);
+        }
+
+        /// <summary>
+        /// Clears exactly what a record carries - cooldowns, charges and loose
+        /// tags - so a load replaces the actor's state instead of layering onto
+        /// it. Running activations are not touched; they are not saved either.
+        /// </summary>
+        internal void ClearSavedState()
+        {
+            cooldownEndTimes.Clear();
+            charges.Clear();
+            chargeRestoreTimers.Clear();
+            foreach (GameplayTag tag in new List<GameplayTag>(looseTags))
+            {
+                SetLooseTag(tag, false);
             }
         }
 
@@ -889,7 +2417,12 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
-        private float GetCharges(AbilityDefinition ability)
+        /// <summary>
+        /// Charges left on an ability, or positive infinity for one without a
+        /// charge limit. A read for tooling and UI; the system spends and
+        /// restores them itself.
+        /// </summary>
+        public float GetCharges(AbilityDefinition ability)
         {
             if (!ability.HasLimitedCharges)
             {
@@ -983,17 +2516,156 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
-        private void AddGrantedTags(AbilityDefinition ability)
+        /// <summary>
+        /// Applies pending window changes as one batch. Closes run before opens,
+        /// and notifications report only effective per-tag transitions, so
+        /// overlapping windows and adjacent windows do not emit false edges.
+        /// </summary>
+        private void ApplyTagWindowChanges()
         {
-            foreach (GameplayTag tag in ability.GrantedTags)
+            if (closedWindowTags.Count == 0 && openedWindowTags.Count == 0)
             {
-                if (tag.IsEmpty)
+                return;
+            }
+
+            var previousCounts = new Dictionary<GameplayTag, int>();
+            var changedTags = new List<GameplayTag>();
+            CaptureWindowTagCounts(closedWindowTags, previousCounts, changedTags);
+            CaptureWindowTagCounts(openedWindowTags, previousCounts, changedTags);
+
+            for (int i = 0; i < closedWindowTags.Count; i++)
+            {
+                GameplayTag tag = closedWindowTags[i];
+                RemoveTagInstance(tag);
+                RemoveWindowTagInstance(tag);
+            }
+
+            for (int i = 0; i < openedWindowTags.Count; i++)
+            {
+                GameplayTag tag = openedWindowTags[i];
+                AddTagInstance(tag);
+                AddWindowTagInstance(tag);
+            }
+
+            closedWindowTags.Clear();
+            openedWindowTags.Clear();
+
+            for (int i = 0; i < changedTags.Count; i++)
+            {
+                GameplayTag tag = changedTags[i];
+                bool wasOpen = previousCounts[tag] > 0;
+                bool isOpen = activeWindowTagCounts.TryGetValue(tag, out int count) && count > 0;
+                if (wasOpen != isOpen)
+                {
+                    StepTagWindowChanged?.Invoke(tag, isOpen);
+                }
+            }
+        }
+
+        private void CaptureWindowTagCounts(
+            List<GameplayTag> tags,
+            Dictionary<GameplayTag, int> previousCounts,
+            List<GameplayTag> changedTags)
+        {
+            for (int i = 0; i < tags.Count; i++)
+            {
+                GameplayTag tag = tags[i];
+                if (previousCounts.ContainsKey(tag))
                 {
                     continue;
                 }
 
-                grantedTagCounts.TryGetValue(tag, out int count);
-                grantedTagCounts[tag] = count + 1;
+                activeWindowTagCounts.TryGetValue(tag, out int count);
+                previousCounts.Add(tag, count);
+                changedTags.Add(tag);
+            }
+        }
+
+        private void AddWindowTagInstance(GameplayTag tag)
+        {
+            activeWindowTagCounts.TryGetValue(tag, out int count);
+            activeWindowTagCounts[tag] = count + 1;
+        }
+
+        private void RemoveWindowTagInstance(GameplayTag tag)
+        {
+            if (!activeWindowTagCounts.TryGetValue(tag, out int count))
+            {
+                return;
+            }
+
+            if (count <= 1)
+            {
+                activeWindowTagCounts.Remove(tag);
+            }
+            else
+            {
+                activeWindowTagCounts[tag] = count - 1;
+            }
+        }
+
+        private void ClearRuntimeState()
+        {
+            ForceCancelActiveAbility(CommonGameplayTags.CancelOwnerTeardown);
+            // Whatever survived the activations belonged to the actor, and the
+            // actor is going away too.
+            actorTasks.CancelAll();
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                activeInstances[i].CancelTasks();
+            }
+
+            activeInstances.Clear();
+            tickBuffer.Clear();
+            taskBuffer.Clear();
+            notifyBuffer.Clear();
+            movementBuffer.Clear();
+            supersededBuffer.Clear();
+            eventAdvanceBuffer.Clear();
+            animationPlayer?.Dispose();
+            animationPlayer = null;
+            // Persistent cues end with the actor: a presenter that pooled a loop
+            // for one of them gets its Remove.
+            cues?.RemoveAll();
+            looseTags.Clear();
+            grantedTagCounts.Clear();
+            activeWindowTagCounts.Clear();
+            openedWindowTags.Clear();
+            closedWindowTags.Clear();
+        }
+
+        private void AddTagInstance(GameplayTag tag)
+        {
+            if (tag.IsEmpty)
+            {
+                return;
+            }
+
+            grantedTagCounts.TryGetValue(tag, out int count);
+            grantedTagCounts[tag] = count + 1;
+        }
+
+        private void RemoveTagInstance(GameplayTag tag)
+        {
+            if (!grantedTagCounts.TryGetValue(tag, out int count))
+            {
+                return;
+            }
+
+            if (count <= 1)
+            {
+                grantedTagCounts.Remove(tag);
+                return;
+            }
+
+            grantedTagCounts[tag] = count - 1;
+        }
+
+        private void AddGrantedTags(AbilityDefinition ability)
+        {
+            foreach (GameplayTag tag in ability.GrantedTags)
+            {
+                AddTagInstance(tag);
             }
         }
 
@@ -1001,115 +2673,249 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             foreach (GameplayTag tag in ability.GrantedTags)
             {
-                if (!grantedTagCounts.TryGetValue(tag, out int count))
-                {
-                    continue;
-                }
-
-                if (count <= 1)
-                {
-                    grantedTagCounts.Remove(tag);
-                }
-                else
-                {
-                    grantedTagCounts[tag] = count - 1;
-                }
+                RemoveTagInstance(tag);
             }
         }
 
         /// <summary>
-        /// Resolves the travel snapshot for one activation. Direction follows
-        /// the ability's displacement mode, the body is the owner's Rigidbody
-        /// (null when the owner has none, which silently disables travel).
+        /// Starts the travel the running step owns, as a task on the activation.
+        ///
+        /// The two kinds a step can have are different tasks, not two branches of
+        /// one: an assist approach is a <see cref="MoveTowardTargetTask"/>,
+        /// which knows it is closing a gap to a body, and authored displacement
+        /// is a <see cref="MoveByDistanceTask"/>, which only knows a direction
+        /// and a distance. A step cannot carry both — validation refuses it — so
+        /// the choice is exclusive.
+        ///
+        /// Both keep the authored numbers exactly: the same frame window, the
+        /// same duration derived from it, and for the approach the distance the
+        /// prelude already measured, so no asset means anything different than
+        /// it did.
         /// </summary>
-        private static void BeginInstanceDisplacement(
+        private void BeginStepDisplacement(
             AbilityInstance instance,
-            AbilityDefinition ability,
+            AbilityStep step,
             AbilityContext context,
             float assistApproachDistance)
         {
-            if (instance == null)
+            if (instance == null || step == null)
             {
                 return;
             }
 
             int startFrame;
             int endFrame;
-            float distance;
-            Vector3 direction;
+            AbilityMoveTask task;
             if (assistApproachDistance > Mathf.Epsilon)
             {
                 startFrame = 1;
-                endFrame = Mathf.Max(2, ability.StartupEndFrame);
-                distance = assistApproachDistance;
-                direction = context.Direction;
+                endFrame = Mathf.Max(2, step.StartupEndFrame);
+                task = new MoveTowardTargetTask(
+                    context.Target,
+                    assistApproachDistance,
+                    AbilityDisplacement.WindowDurationSeconds(
+                        startFrame, endFrame, step.FrameRate))
+                {
+                    Priority = AbilityMoveTask.ApproachPriority,
+                };
             }
-            else if (ability.HasDisplacement)
+            else if (step.HasDisplacement)
             {
-                startFrame = ability.DisplacementStartFrame;
-                endFrame = ability.DisplacementEndFrame;
-                distance = ability.DisplacementDistance;
-                direction = AbilityDisplacement.ResolveDirection(
-                    ability.DisplacementDirection,
-                    context);
+                startFrame = step.DisplacementStartFrame;
+                endFrame = step.DisplacementEndFrame;
+                task = new MoveByDistanceTask(
+                    AbilityDisplacement.ResolveDirection(step.DisplacementDirection, context),
+                    step.DisplacementDistance,
+                    AbilityDisplacement.WindowDurationSeconds(
+                        startFrame, endFrame, step.FrameRate))
+                {
+                    Priority = AbilityMoveTask.DisplacementPriority,
+                };
             }
             else
             {
                 return;
             }
 
-            Rigidbody body = context.Owner != null
-                ? context.Owner.GetComponent<Rigidbody>()
-                : null;
-            float duration = AbilityDisplacement.WindowDurationSeconds(
-                startFrame,
-                endFrame,
-                ability.FrameRate);
-            instance.BeginDisplacement(
-                direction,
-                body,
-                distance,
-                duration,
-                startFrame,
-                endFrame);
+            instance.RunDisplacement(task, this, startFrame, endFrame);
         }
 
         /// <summary>
-        /// Moves the owner through its displacement window. Travel is planar
-        /// and kinematic (MovePosition, like root motion): velocity is never
-        /// touched, and nothing is swept. Cancelling or completing the
-        /// ability discards the instance, which stops travel immediately.
+        /// Finds the highest priority any movement task is contending with this
+        /// tick, before a single one has moved. Deciding it up front is what
+        /// lets the winner be applied in the middle of the activation loop, in
+        /// the same place the old single displacement was, while still knowing
+        /// about tasks belonging to activations that have not been reached yet.
         /// </summary>
-        private static void ApplyActiveDisplacement(AbilityInstance instance, float deltaTime)
+        private void PrepareMovementArbitration(AbilityTaskTickPhase phase)
         {
-            if (instance == null ||
-                !instance.HasActiveDisplacement ||
-                instance.DisplacementBody == null ||
-                !instance.IsDisplacementWindowOpen)
+            movementOwnerTaken = false;
+            movementPriorityCeiling = int.MinValue;
+            for (int i = 0; i < activeInstances.Count; i++)
             {
-                return;
+                RaiseMovementCeiling(activeInstances[i].Tasks, phase);
             }
 
-            if (!instance.TickDisplacement(deltaTime, out Vector3 step))
-            {
-                return;
-            }
-
-            Rigidbody body = instance.DisplacementBody;
-            body.MovePosition(body.position + step);
+            RaiseMovementCeiling(actorTasks, phase);
         }
 
-        private void PlayAbilityAnimation(AbilityDefinition ability)
+        private void RaiseMovementCeiling(AbilityTaskScope scope, AbilityTaskTickPhase phase)
         {
+            IReadOnlyList<AbilityTask> scopeTasks = scope.Tasks;
+            for (int i = 0; i < scopeTasks.Count; i++)
+            {
+                if (scopeTasks[i] is AbilityMoveTask move &&
+                    move.IsRunning &&
+                    move.TickPhase == phase &&
+                    move.IsWindowOpen &&
+                    move.Priority > movementPriorityCeiling)
+                {
+                    movementPriorityCeiling = move.Priority;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Runs one scope for one phase: the plain tasks tick themselves, the
+        /// movement ones go through arbitration and reach the world only through
+        /// the motor.
+        /// </summary>
+        private void TickScope(
+            AbilityTaskScope scope, AbilityTaskTickPhase phase, float deltaTime)
+        {
+            if (scope.Count == 0)
+            {
+                return;
+            }
+
+            taskBuffer.Clear();
+            movementBuffer.Clear();
+            scope.Collect(phase, taskBuffer);
+            for (int i = 0; i < taskBuffer.Count; i++)
+            {
+                AbilityTask task = taskBuffer[i];
+                if (task is AbilityMoveTask move)
+                {
+                    movementBuffer.Add(move);
+                    continue;
+                }
+
+                task.Tick(deltaTime);
+            }
+
+            taskBuffer.Clear();
+            for (int i = 0; i < movementBuffer.Count; i++)
+            {
+                ApplyMovementTask(movementBuffer[i], deltaTime);
+            }
+
+            movementBuffer.Clear();
+        }
+
+        /// <summary>
+        /// One movement task, one tick. Only the highest-priority task that has
+        /// not yet moved owns the body; ties break by the order the tasks were
+        /// collected, which is activation age, oldest first — so with everything
+        /// at the default priority this is exactly the rule the single
+        /// displacement always followed. A loser does whatever its conflict
+        /// policy says, and under the default that means spending nothing, so it
+        /// still travels its full distance once it wins.
+        ///
+        /// Travel reaches the world only here, through the motor, which is what
+        /// keeps <c>Rigidbody</c> and friends out of the tasks entirely.
+        /// </summary>
+        private void ApplyMovementTask(AbilityMoveTask move, float deltaTime)
+        {
+            if (!move.IsRunning || !move.IsWindowOpen)
+            {
+                return;
+            }
+
+            bool ownsBody = !movementOwnerTaken && move.Priority >= movementPriorityCeiling;
+            if (!ownsBody)
+            {
+                switch (move.ConflictPolicy)
+                {
+                    case AbilityMovementConflictPolicy.Blend:
+                        break;
+                    case AbilityMovementConflictPolicy.Abort:
+                        move.AbortForConflict();
+                        return;
+                    default:
+                        return;
+                }
+            }
+
+            if (!move.TickMovement(deltaTime, out Vector3 delta))
+            {
+                return;
+            }
+
+            if (ownsBody)
+            {
+                movementOwnerTaken = true;
+            }
+
+            Motor?.Move(delta, move.Collision);
+        }
+
+        private void PruneTaskScopes()
+        {
+            for (int i = 0; i < activeInstances.Count; i++)
+            {
+                activeInstances[i].Tasks.PruneFinished();
+            }
+
+            actorTasks.PruneFinished();
+        }
+
+        /// <summary>
+        /// The motor a project gets without opting into the seam: the owner
+        /// Rigidbody, moved with <c>MovePosition</c> the way root motion does.
+        /// Velocity is never touched — the owner own motor owns velocity, the
+        /// ability only adds travel — and nothing is swept, because the world
+        /// collider and the level already constrain where the body may rest.
+        /// A null body simply refuses to move, which is what an actor with no
+        /// Rigidbody has always done.
+        /// </summary>
+        private sealed class RigidbodyDisplacementMotor : IAbilityMotor
+        {
+            private readonly Rigidbody body;
+
+            public RigidbodyDisplacementMotor(Rigidbody body)
+            {
+                this.body = body;
+            }
+
+            public Vector3 Position => body != null ? body.position : Vector3.zero;
+
+            public Vector3 Move(Vector3 delta, AbilityMovementCollision collision)
+            {
+                if (body == null || delta.sqrMagnitude <= Mathf.Epsilon)
+                {
+                    return Vector3.zero;
+                }
+
+                body.MovePosition(body.position + delta);
+                return delta;
+            }
+        }
+
+        private void PlayStepAnimation(AbilityStep step)
+        {
+            if (step == null)
+            {
+                return;
+            }
+
             animationPlayer ??= new AbilityAnimationPlayer(animator);
-            animationPlayer.Play(
-                ability.AnimationClip,
-                ability.AnimationBlendDuration);
+            animationPlayer.Play(step.AnimationClip, step.AnimationBlendDuration);
         }
 
         private void StopAbilityAnimation(AbilityDefinition ability)
         {
-            animationPlayer?.Stop(ability.AnimationBlendDuration);
+            AbilityStep step = (ability as TimelineAbilityDefinition)?.FirstStep;
+            animationPlayer?.Stop(step == null ? 0f : step.AnimationBlendDuration);
         }
     }
 }

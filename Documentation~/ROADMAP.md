@@ -1,396 +1,256 @@
 # Fofuxo Gameplay Ability System roadmap
 
-This roadmap describes the intended evolution of the package from its current
-single-player combat foundation into a reusable, production-oriented ability
-framework. It is inspired by Unreal's Gameplay Ability System (GAS), but it does
-not aim for API parity. Features should enter the package only when they have a
-clear Unity use case, deterministic runtime ownership, focused tests, and useful
-authoring tools.
+**This file lists only work that has not been built yet.** Nothing here
+describes shipped behaviour: `README.md` documents what the package does today
+and where it stops, and `CHANGELOG.md` records what changed and why. A milestone
+is deleted from this file the moment it ships, and the ones left behind are
+renumbered, so the numbers below are positions in the remaining queue rather
+than stable identifiers — a `Milestone N` mentioned in `CHANGELOG.md` refers to
+the numbering in force when that entry was written.
+
+The package is inspired by Unreal's Gameplay Ability System as documented in
+[tranek/GASDocumentation](https://github.com/tranek/GASDocumentation), but it
+does not aim for API parity. A feature enters the package only when it has a
+clear Unity use case, deterministic runtime ownership, focused tests, and
+useful authoring tools.
 
 ## Table of contents
 
-- [Product direction](#product-direction)
-- [Unreal GAS concepts and Fofuxo equivalents](#unreal-gas-concepts-and-fofuxo-equivalents)
-- [Architecture decisions](#architecture-decisions)
-- [Current baseline](#current-baseline)
-- [Delivery priorities](#delivery-priorities)
-- [Milestone 1 — Core contracts and validation](#milestone-1--core-contracts-and-validation)
-- [Milestone 2 — Gameplay effect specifications](#milestone-2--gameplay-effect-specifications)
-- [Milestone 3 — Target data and reusable targeting](#milestone-3--target-data-and-reusable-targeting)
-- [Milestone 4 — Ability tasks and movement](#milestone-4--ability-tasks-and-movement)
-- [Milestone 5 — Sequences, input, and cancellation](#milestone-5--sequences-input-and-cancellation)
-- [Milestone 6 — Gameplay cues and presentation](#milestone-6--gameplay-cues-and-presentation)
-- [Milestone 7 — Editor tooling and diagnostics](#milestone-7--editor-tooling-and-diagnostics)
-- [Milestone 8 — Persistence and optional networking](#milestone-8--persistence-and-optional-networking)
-- [Milestone 9 — Samples, performance, and 1.0 readiness](#milestone-9--samples-performance-and-10-readiness)
+- [Orientation for an agent picking this up](#orientation-for-an-agent-picking-this-up)
+- [Scope: single player](#scope-single-player)
+- [Rules any new work must respect](#rules-any-new-work-must-respect)
+- [Delivery order](#delivery-order)
+- [Milestone 1 — The 1.0 surface](#milestone-1--the-10-surface)
+- [Blocked on a consumer](#blocked-on-a-consumer)
 - [Non-goals](#non-goals)
 
-## Product direction
+## Orientation for an agent picking this up
 
-Fofuxo GAS should provide generic combat orchestration while consumer projects
-retain control of character motors, health presentation, AI decisions, input,
-camera behavior, and game-specific rules. The package owns:
+Read these before writing a line, in this order:
 
-- Immutable ability, effect, targeting, and cue definitions.
-- Per-actor ability state, attributes, tags, cooldowns, charges, and active effects.
-- Per-activation contexts, target data, tasks, hit registration, and cancellation.
-- Deterministic ordering of activation, targeting, movement, effects, and cues.
-- Validation, diagnostics, tests, and authoring support for these contracts.
+1. **`CLAUDE.md`** (byte-identical to `AGENTS.md`) — the architecture
+   invariants, the asset naming convention, and the rule that authored assets
+   and the public API are *not* design constraints before `1.0`. Not optional;
+   it is not auto-loaded, and a change that skips it is made against the wrong
+   defaults.
+2. **`README.md`** — current behaviour and its documented limitations.
+3. **`CHANGELOG.md`** — why the current shape was chosen. Most "why isn't this a
+   subclass / an enum / an effect?" questions are answered there.
+4. **`Tests/EditMode`** — the executable contract. Fifty-six test files, 584
+   tests; the fastest way to learn a subsystem is to read its test.
 
-The package should remain useful in local games without forcing networking
-concepts into every API. Networking, replication, and prediction are extension
-layers that must not weaken deterministic single-player behavior.
+Facts you would otherwise have to go find:
 
-## Unreal GAS concepts and Fofuxo equivalents
+| | |
+| --- | --- |
+| Package id | `com.uayten.fofuxogameplayabilitysystem` |
+| Namespace | `Fofuxo.GameplayAbilitySystem` |
+| Unity | `6000.6` or newer |
+| Version | pre-1.0, `0.x`, no compatibility promise |
+| Assemblies | `Uayten.FofuxoGameplayAbilitySystem` (core), `.Motors`, `.Input`, `.Editor`, `.Tests` |
+| Asset menu root | `Fofuxo/Abilities/…` |
+| Only consumer | BossRush — the Player (`GrantAbilityIntegration`, `PlayerController`) and the boss (`FergusBrain`, `FergusBoss`) |
 
-The architectural split follows the concepts documented in
-[tranek/GASDocumentation](https://github.com/tranek/GASDocumentation):
+Layout: `Runtime/Core` (definitions, steps, instances, `AbilitySystem`, tags,
+contracts), `Runtime/Attributes`, `Runtime/Effects`, `Runtime/Targeting`,
+`Runtime/Tasks`, `Runtime/Motors`, `Runtime/Input`, `Runtime/Presentation`,
+`Runtime/Diagnostics`, `Editor`, `Tests/EditMode`.
 
-| Unreal GAS concept | Fofuxo direction | Responsibility |
+The debugging tools are built: the Ability Debugger window
+(`AbilitySystemDebuggerWindow`), the per-actor `AbilityEventHistory` behind
+`AbilitySystem.History`, the `AbilityDiagnostics` switch and counters, and the
+editor-owned `AbilityTimeControls`. Use them before adding a log line — a
+refused activation is in the actor's history with its rejection code, and the
+window's audit runs the runtime's own `EvaluateActivation`.
+
+The combat loop is closed: damage is an attribute change made by
+`DamageEffectDefinition` on the target's `AttributeSet`, followed by a gameplay
+event (`Event.HitReaction`, `Event.Knockdown`) the target's own
+`HitReactionAbilityDefinition` answers — clip, lock, cancellation and knockback
+all on the target, read off `AbilityInstance.TriggeringSpec`. `AbilityHitInfo`
+and `IAbilityDamageReceiver` no longer exist; do not bring a receiver callback
+back under another name.
+
+Presentation is built too: every actor's `GameplayCueDispatcher`
+(`AbilitySystem.Cues`) raises `Execute`, `Add`, `WhileActive` and `Remove` with
+read-only `GameplayCueParameters`; an effect's `cueTag` and `cueReplacements`
+drive persistent cues and per-outcome replacements; step cues know a hit from
+a miss. A presenter gets a handle and a lifecycle, never a runtime object.
+
+Persistence is built: `AbilityPersistence.Capture` and `.Restore` write an
+actor's cooldowns, charges, attribute base values, active effects and loose tags
+into an `AbilitySaveRecord` and put them back, through an `IAbilitySaveResolver`
+the game supplies and an `AbilityOfflinePolicy` it picks. A restore rebuilds an
+effect without executing it. Nothing of it touches an actor that never saves:
+there is no component, no serialized field and no tick.
+
+### The vocabulary
+
+| Unreal GAS concept | Fofuxo type | Responsibility |
 | --- | --- | --- |
-| `AbilitySystemComponent` | `AbilitySystem` | Activation, active runtime state, tags, cooldowns, effects, and events |
-| `GameplayAbility` | `AbilityDefinition` + `AbilityInstance` | An action an actor performs and its per-activation state |
+| `AbilitySystemComponent` | `AbilitySystem` | Activation, active runtime state, tags, cooldowns, events |
+| `GameplayAbility` | `AbilityDefinition` + `AbilityInstance` | An action and its per-activation state; it has no timeline of its own |
+| `GameplayAbility` + montage | `TimelineAbilityDefinition` + `AbilityStep` | The kind of ability authored as ordered swings over frames |
 | `GameplayEffect` | `GameplayEffectDefinition` + `GameplayEffectSpec` + `ActiveGameplayEffect` | Attribute/tag changes and their duration, stacking, and source context |
 | `AttributeSet` | `AttributeSet` + `AttributeSetDefinition` | Per-actor numerical gameplay state |
 | `GameplayTag` | `GameplayTag` | State and semantic labels used by activation and effects |
-| `AbilityTask` | Planned `AbilityTask` runtime instances | Cancellable operations that wait, move, target, or respond to events over time |
-| `TargetData` | Planned `AbilityTargetData` | Serializable target actors, hit results, positions, and directions |
-| `GameplayCue` | `GameplayCueTrigger` + consumer presenters | Cosmetic VFX, SFX, camera, animation, and UI reactions |
+| `AbilityTask` | `AbilityTask` + `AbilityTaskScope` | Cancellable work that waits, moves, targets, or listens over time |
+| `TargetData` | `AbilityTargetData` | Serializable target actors, hit results, positions, directions |
+| `GameplayCue` | `GameplayCueTrigger` + consumer presenters | Cosmetic VFX, SFX, camera, animation, UI |
 
-The reference describes Gameplay Effects as data-only vessels for attribute and
-tag changes, Gameplay Abilities as actor actions, and Ability Tasks as the place
-for latent work such as root-motion movement. Fofuxo should preserve that
-separation even when a short-term compatibility API combines damage and reaction
-data in one hit payload.
+Three deliberate divergences from the reference, each of which will look like a
+bug until you know it was a decision:
 
-## Architecture decisions
+- **A combo is one ability, not a chain of them.** Unreal links a combo across
+  several abilities by input; here it is one `AbilityDefinition` with an ordered
+  `steps` list, so cost, cooldown, tags and cancellation are decided once per
+  activation.
+- **Cancellation is named by `GameplayTag`, not by an enum.** The package raises
+  only what it causes itself — `Cancel.Manual`, `Cancel.TargetLost`,
+  `Cancel.PhysicsForce`, `Cancel.StepTimeout`, `Cancel.Superseded`,
+  `Cancel.Failed`, `Cancel.OwnerTeardown`. A game adds its own tags in the same
+  namespace and never edits the package.
+- **An ability's identity is its asset, not its class.** The class is the
+  schema; the asset is the instance. Two abilities that share values are two
+  assets, never a base class and a child.
 
-### Actions, state changes, and presentation stay separate
+## Scope: single player
 
-- An attack, dash, roll, block, cast, or hit reaction is an ability.
-- Damage, healing, resource costs, buffs, debuffs, and granted tags are gameplay effects.
-- Timed movement, target acquisition, event waits, and projectile waits are ability tasks.
-- Particles, sounds, camera shake, hit stop presentation, and UI feedback are gameplay cues.
-- Attributes store numbers; tags store semantic state; neither should drive presentation directly.
+**This package targets single-player games, and every milestone below assumes
+one authoritative local runtime.** Replication, client prediction, prediction
+keys, rollback, and server-authoritative validation are deliberately absent.
+They are the largest and most invasive part of Unreal's GAS, and paying for them
+without a multiplayer host would complicate every API for a feature nothing
+consumes.
 
-### Knockback ownership
+The seam that exists is enough: assign an `IAbilityReplicationSink` to forward
+activations, cues, and endings to a netcode layer.
 
-Knockback is not a standalone attribute effect and should not be implemented as
-an attacker-owned ability that directly controls another actor for its full
-lifetime.
+If a consumer ever goes multiplayer, the concepts to implement at that point —
+prediction keys, prediction windows, effect replication modes, replicated target
+data, rollback-safe scopes — are described in detail by
+[tranek/GASDocumentation](https://github.com/tranek/GASDocumentation). Treat that
+as a new roadmap written against a concrete multiplayer host, not as a milestone
+waiting at the end of this one.
 
-The current compatibility path is:
+## Rules any new work must respect
 
-```text
-Attack ability
-    -> damage query effect
-        -> AbilityHitInfo(damage, impact, knockback velocity, duration)
-            -> consumer damage receiver applies health and movement
-```
+These are the constraints that shape whatever is built next; the full set lives
+in `CLAUDE.md`.
 
-This remains supported while the task/effect model matures. The target design is:
+- **Actions, state changes and presentation stay separate.** An attack, dash,
+  roll, block, cast or hit reaction is an ability. Damage, healing, costs, buffs,
+  debuffs and granted tags are gameplay effects. Timed movement, target
+  acquisition and event waits are ability tasks. Particles, sounds, camera shake
+  and UI feedback are gameplay cues.
+- **Definition assets never contain runtime state.** Candidate buffers, selected
+  targets, elapsed time, remaining movement, stacks and effect handles belong to
+  actor or activation runtime objects. An effect that writes to its definition is
+  a bug that survives Play Mode and corrupts the asset on disk.
+- **Gameplay cues stay cosmetic.** A cue may present an event but must never
+  apply damage, healing, movement, invulnerability, parry success, or any other
+  authoritative state.
+- **`CanActivate` and target validation are side-effect free.** That includes
+  the diagnostics: a question leaves nothing in the actor's history, only an
+  attempt does.
+- **Effects sharing a trigger frame, a step and a shape share one physics
+  query**, through `AbilityInstance.AcquireTargets`. That is what makes damage
+  and physics force hit the same enemy; it is covered by tests and must survive
+  any change to where targeting lives.
+- **Animator state is never the sole authority for gameplay timing.**
+- **No package assembly, runtime or editor, may reference a consumer type.** The
+  adapter direction is game → package.
+- **`AbilityDefinition` is subclassed for a new *kind* of ability, never one per
+  skill.** Reusable consequences belong in `GameplayEffectDefinition`, which is
+  where the package does its subclassing.
+- **Target Assist is a targeting prelude, not an ability.**
+  `TargetAssistDefinition` is a plain `ScriptableObject` of query and approach
+  fields that resolves before the step runs — it never becomes an active
+  ability, and the parent ability keeps ownership of cooldown, costs, tags,
+  timeline, animation, hit registration, completion and cancellation. A step that
+  runs assist-driven approach must not also declare its own displacement window
+  until multiple concurrent movement tasks exist.
+- **Diagnostics record; they never decide.** A new runtime path that matters to
+  a debugger records an `AbilityEvent` behind the `AbilityDiagnostics.Enabled`
+  check and allocates nothing when it is off. Time control stays in the editor
+  assembly: no runtime code writes `Time.timeScale`.
 
-```text
-Attack ability
-    -> target data / hit result
-    -> instant damage GameplayEffectSpec changes Health or Poise
-    -> gameplay event requests a target-owned HitReaction ability
-        -> movement task applies knockback
-        -> reaction ability owns animation, control lock, and cancellation
-    -> gameplay cue presents impact cosmetics
-```
+## Delivery order
 
-This split lets immunity, armor, poise, blocking, super armor, and death decide
-whether the target should move. It also gives cancellation and future network
-prediction one authoritative owner. `AbilityHitInfo` should be deprecated only
-after the effect-spec and target-reaction path covers existing consumers.
+Ordered by cost paid against value returned for a solo developer with one
+consumer project — not by Unreal parity.
 
-### Target Assist is a parent-ability prelude
+1. **Milestone 1** — what is left before the public surface can be frozen.
 
-`TargetAssistDefinition` is composed inside an attack through `Nested Assist`.
-It runs first, without becoming a separately active ability:
+## Milestone 1 — The 1.0 surface
 
-1. Query damageable candidates once at activation.
-2. Accept any candidate in the proximity circle.
-3. Accept candidates in the forward cone up to the configured search distance.
-4. When search distance is zero, use twice the proximity radius by default.
-5. Rank valid candidates deterministically by distance with a small angular bias.
-6. Propagate the selected actor and direction into the parent activation context.
-7. Rotate the owner toward the selected target.
-8. Optionally approach during the parent's startup until the assist's `Stopping Distance` is reached.
-9. Start the parent animation and later execute its attack effects against the resolved target.
-
-The parent remains the owner of cooldown, costs, tags, timeline, animation, hit
-registration, completion, and cancellation. A parent that enables assist-driven
-approach must not also declare a separate displacement window until multiple
-concurrent movement tasks exist.
-
-### Definition assets never contain runtime state
-
-Definitions are immutable authoring data. Candidate buffers, selected targets,
-elapsed time, remaining movement, stacks, prediction keys, and effect handles
-belong to actor or activation runtime objects.
-
-### Gameplay cues remain cosmetic
-
-Cues may present an event but must never apply damage, healing, movement,
-invulnerability, parry success, or other authoritative gameplay state.
-
-## Current baseline
-
-The following capabilities are already available:
-
-- Frame-based ability timelines with startup, active, and recovery phases.
-- Ability and sequence activation, cooldowns, costs, charges, tags, and cancellation reasons.
-- Automatic and manual sequences with frame-gated continuation, early input buffering,
-  input cutoffs, and movement-unlock frames.
-- Directional activation contexts and ability-owned displacement windows.
-- Nested target assist with proximity-circle and frontal-cone selection.
-- Sphere, box, capsule, and area damage query effects.
-- Hit deduplication, whiff events, parry payloads, stun data, and knockback payloads.
-- Attribute identifiers, asset-authored initial sets, instant modifiers, duration modifiers,
-  periodic modifiers, regeneration, stacking policies, and change events.
-- Frame-based and manually triggered gameplay cues.
-- Animation event bridging, debug drawing, lifecycle events, a debugger component,
-  and replication sink interfaces.
-
-The largest missing architectural pieces are generic Gameplay Effect specs,
-target data, cancellable Ability Tasks, a complete active-effect lifecycle,
-authoring/debugger windows, and validated optional networking semantics.
-
-## Delivery priorities
-
-Work should normally proceed in this order:
-
-1. Protect current behavior with validation and focused tests.
-2. Introduce effect specs and active-effect handles without breaking current effects.
-3. Standardize target data and target queries.
-4. Add cancellable ability tasks, then migrate movement and reactions onto them.
-5. Harden combo, input, and cancellation policies.
-6. Expand cue presentation contracts.
-7. Build editor tooling around stable runtime APIs.
-8. Add persistence and networking only behind explicit adapters.
-9. Ship samples, performance budgets, upgrade notes, and a stable 1.0 API.
-
-## Milestone 1 — Core contracts and validation
-
-Goal: make the existing local runtime difficult to misconfigure and safe to extend.
+Most of this milestone shipped: the Melee Combat sample, the profiling scene,
+the allocation budget tests, the documentation test, the versioning and
+deprecation policy, the release checklist and the upgrade guide. `README.md`
+and `CHANGELOG.md` describe them. What is left is what actually declares `1.0`.
 
 Deliverables:
 
-- Validate duplicate ability and sequence IDs across a loadout.
-- Validate nested-definition cycles, missing references, invalid trigger ordering,
-  incompatible movement sources, and target-layer masks.
-- Define explicit activation outcomes: accepted, rejected, completed, cancelled,
-  interrupted, target lost, and failed during execution.
-- Add typed activation rejection codes alongside human-readable messages.
-- Define public API compatibility and deprecation rules for the `0.x` line.
-- Guarantee lifecycle event ordering and document reentrancy behavior.
-- Add tests for disable/destroy cleanup and exceptions thrown by consumer effects.
+- **Per-member API documentation.** Every public *type* is documented and a test
+  keeps it that way; roughly four hundred public members - properties, methods
+  and events - still are not. The same test extends to members once they are
+  written.
+- **A namespace for the editor assembly.** Its public types sit in the global
+  namespace today, which a consumer project inherits. Moving them is a break,
+  so it belongs before `1.0` and not after.
+- **The version itself**: `package.json` to `1.0.0`, the changelog heading
+  dated, the tag, and the README's "no compatibility promise" section replaced
+  by the policy in `Documentation~/RELEASE_CHECKLIST.md`.
 
 Acceptance criteria:
 
-- Every invalid asset reports an actionable Inspector message.
-- `CanActivate` remains side-effect free.
-- Runtime definitions are never mutated.
-- Lifecycle order is covered by EditMode tests.
-
-## Milestone 2 — Gameplay effect specifications
-
-Goal: separate immutable effect authoring data from calculated per-application data.
-
-Deliverables:
-
-- Add `GameplayEffectDefinition` with Instant, Duration, and Infinite policies.
-- Add `GameplayEffectSpec` carrying source, target, level, captured attributes,
-  calculated magnitudes, tags, and contextual target data.
-- Add `ActiveGameplayEffect` and stable handles for query, refresh, and removal.
-- Support modifiers, executions, duration, periods, stacking, overflow, immunity,
-  granted tags, and removal tags.
-- Provide source/target capture rules and snapshot versus live evaluation.
-- Migrate costs and cooldowns only after the generic lifecycle proves clearer than
-  their current explicit implementation.
-- Bridge existing `AbilityEffectDefinition` assets to specs for a deprecation window.
-
-Acceptance criteria:
-
-- Instant effects change base values deterministically.
-- Duration and Infinite effects contribute to current values and clean up completely.
-- Stack, refresh, ignore, overflow, and removal behavior are independently tested.
-- Specs are per application and definitions remain immutable.
-
-## Milestone 3 — Target data and reusable targeting
-
-Goal: make target selection a reusable input to abilities and effects rather than
-an effect-specific physics query.
-
-Deliverables:
-
-- Add `AbilityTargetData` for actors, colliders, hit points, normals, origins,
-  directions, and world positions.
-- Add allocation-conscious sphere, cone, box, capsule, ray, and overlap queries.
-- Add filters for owner exclusion, teams/factions, interfaces, tags, alive state,
-  line of sight, maximum count, and deterministic sorting.
-- Allow local acquisition, externally supplied targets, and later replicated target data.
-- Make Target Assist produce target data consumed by the parent ability.
-- Add editor gizmos that use the same geometry and filters as runtime queries.
-- Define policies for target loss, retargeting, locking, and snapshot versus live targets.
-
-Acceptance criteria:
-
-- Query and effect geometry share one tested implementation.
-- Target ordering is deterministic for equal-distance candidates.
-- Target Assist circle, cone, direction, context propagation, and no-target behavior
-  are covered by focused tests.
-
-## Milestone 4 — Ability tasks and movement
-
-Goal: represent time-based work as cancellable per-activation runtime tasks.
-
-Initial tasks:
-
-- `WaitDelay`
-- `WaitGameplayEvent`
-- `WaitInputPress` and `WaitInputRelease`
-- `WaitAnimationEvent`
-- `AcquireTargets`
-- `MoveByDistance`
-- `MoveTowardTarget`
-- `ApplyKnockback`
-- `SpawnProjectileAndWait`
-
-Movement requirements:
-
-- A task snapshots or tracks its direction according to an explicit policy.
-- Cancellation, completion, target loss, death, and disable stop movement immediately.
-- Character-controller, Rigidbody, and custom-motor adapters remain outside the core.
-- Collision behavior is explicit: unswept root-motion-like travel, swept travel,
-  or consumer-motor authority.
-- Concurrent movement tasks declare priority and conflict policy.
-- Target Assist approach migrates to `MoveTowardTarget` without changing authored assets.
-- Target-owned hit-reaction abilities migrate knockback to `ApplyKnockback`.
-
-Acceptance criteria:
-
-- Tasks never survive their owning activation.
-- Cancellation produces no extra movement tick.
-- Total displacement is deterministic across variable frame times.
-- Movement adapters have focused tests and no dependency on game-specific controllers.
-
-## Milestone 5 — Sequences, input, and cancellation
-
-Goal: support responsive player combos and deterministic AI/scripted sequences.
-
-Deliverables:
-
-- Formalize automatic, manual, event-gated, and conditional advancement policies.
-- Extend the shipped per-step frame windows and early buffering with late grace,
-  branch conditions, and richer timeout policies.
-- Preserve one-input-per-step player combos while keeping automatic AI combos.
-- Expose current step, queued intent, deadlines, and last transition reason.
-- Define cancellation propagation between sequence, step, nested prelude, and tasks.
-- Add input-held and input-released activation policies.
-- Support ability groups and mutual-exclusion policies beyond the current single active ability.
-
-Acceptance criteria:
-
-- Every buffered input is consumed once or expires with an observable reason.
-- A failed next step cannot leave a sequence active.
-- Attack, block, roll, hit reaction, and death precedence is covered by tests.
-
-## Milestone 6 — Gameplay cues and presentation
-
-Goal: provide reliable local presentation contracts without allowing cues to own gameplay.
-
-Deliverables:
-
-- Define Execute, Add, WhileActive, and Remove cue lifecycles.
-- Add typed cue parameters with source, target data, magnitude, location, and normal.
-- Add cue suppression and replacement hooks for block, parry, immunity, and miss outcomes.
-- Add pooling-friendly presenter interfaces and stable cue handles.
-- Batch duplicate cues within one activation where appropriate.
-- Keep replication behavior in an optional adapter.
-
-Acceptance criteria:
-
-- Removing an active effect reliably removes its persistent cue.
-- Late presenter registration can reconstruct persistent cues without replaying burst cues.
-- Tests verify that cues cannot modify authoritative package state.
-
-## Milestone 7 — Editor tooling and diagnostics
-
-Goal: make authoring and debugging faster than inspecting raw ScriptableObjects and logs.
-
-Deliverables:
-
-- Ability timeline Inspector with effect, cue, movement, and cancellation lanes.
-- Loadout audit for duplicate IDs, missing references, cycles, and incompatible options.
-- Shared query gizmos and previews for targeting and damage volumes.
-- Runtime debugger window for active ability, phase, frame, context, tasks, tags,
-  attributes, cooldowns, charges, effects, stacks, and recent events.
-- Timestamped per-actor event history with rejection and cancellation reasons.
-- Manual-sequence inspector showing step, queued input, and continuation deadline.
-- Optional hit-stop and slow-motion diagnostic controls owned by editor tooling.
-- Allocation and timing counters for target queries, effect application, and tasks.
-
-Acceptance criteria:
-
-- The runtime debugger introduces no player-build dependency.
-- Validation uses the same rules as runtime activation.
-- Diagnostics can be globally disabled with negligible overhead.
-
-## Milestone 8 — Persistence and optional networking
-
-Goal: define extension seams without claiming built-in production networking prematurely.
-
-Persistence deliverables:
-
-- Stable serialization identifiers for granted abilities, cooldowns, charges, attributes,
-  and persistent active effects.
-- Versioned save records and migration hooks.
-- Explicit policy for restoring elapsed durations and offline progression.
-
-Networking deliverables, only after a concrete multiplayer host exists:
-
-- Authority adapter for activation requests and authoritative target data.
-- Replication records for abilities, effects, attributes, tags, and cues.
-- Prediction keys and rollback-safe scopes for explicitly supported operations.
-- Server validation of targets, costs, cooldowns, and movement requests.
-- Clear prediction support matrix; unsupported operations remain server authoritative.
-
-Acceptance criteria:
-
-- Local-only users pay no networking complexity or runtime cost.
-- No feature is described as predicted until correction and rollback tests exist.
-- Damage and death remain authoritative by default.
-
-## Milestone 9 — Samples, performance, and 1.0 readiness
-
-Goal: prove the API through representative games and freeze a supportable public surface.
-
-Deliverables:
-
-- Minimal samples for melee combo, roll, block/parry, projectile, area effect,
-  buff/debuff, periodic damage, AI activation, and target assist.
-- A complete target-reaction sample demonstrating damage, poise, knockback, and cues.
-- Package documentation tests and upgrade guides.
-- Profiling scenes for dense actors, simultaneous effects, and target queries.
-- Allocation budgets and pooling guidance.
-- Semantic versioning, deprecation windows, release checklist, and changelog discipline.
-- API documentation for every public runtime contract.
-
-Acceptance criteria:
-
-- Clean import and focused tests on supported Unity 6 versions.
-- No game-specific type dependencies in runtime or editor assemblies.
+- Clean import and focused tests on the supported Unity 6 versions.
+- No game-specific type dependencies in runtime or editor assemblies — pinned by
+  `PackageBoundaryTests`.
 - Public API changes are documented and covered by migration guidance.
-- The 1.0 surface has at least one real consumer project using every core subsystem.
+- **A real consumer project uses every core subsystem.** BossRush uses all of
+  them except persistence, which is built and unused until the day/night
+  ability that reads the elapsed time exists. That ability is the last gate.
+
+## Blocked on a consumer
+
+These are designed, agreed, and deliberately not built: each one would be
+invented against nothing. Build it when the trigger fires, not before.
+
+- **Team and faction target filters.** `AbilityTargetFilter` covers owner
+  exclusion, alive state, required and blocked tags, line of sight and maximum
+  count. *Trigger:* a consumer with more than two sides — the current one has
+  two and expresses them with layers.
+- **`SpawnProjectileAndWait`.** *Trigger:* a consumer that actually fires
+  projectiles.
+- **Cooldowns as gameplay effects.** Cooldowns stay a
+  `Dictionary<AbilityDefinition, float>` over `Time.time`, which needs no tick to
+  stay correct. Expressing them as effects costs either an asset per ability or a
+  cooldown tag re-authored onto every ability. *Trigger:* a cooldown-reducing
+  effect with a real use case.
+- **Costs as gameplay effects.** Costs stay `AbilityCost` on the ability, paid by
+  `PayCosts` through the same instant modifier call an effect makes; the
+  activation check must stay side-effect free and is already typed
+  (`InsufficientAttribute`). *Trigger:* a cost discount or a cost that varies by
+  more than a level.
+- **Effect execution calculations as assets.** *Trigger:* a damage formula that
+  a `GameplayEffectMagnitude` cannot express.
+- **Generated attribute accessors.** `AttributeSet` is reached by
+  `GameplayAttribute` identifier today. *Trigger:* a consumer with enough
+  attributes that the identifiers become the authoring cost, plus a measured
+  benefit — codegen is a non-goal without one.
 
 ## Non-goals
 
-- Owning consumer-game input mappings, AI decision systems, health UI, or character controllers.
-- Reproducing every Unreal GAS class or networking behavior one-to-one.
+- Owning consumer-game input mappings, AI decision systems, health UI, or
+  character controllers.
+- Reproducing every Unreal GAS class one-to-one.
+- Multiplayer replication, client prediction, or rollback. See
+  [Scope: single player](#scope-single-player).
+- Reintroducing per-step abilities, one damage effect class per collider shape,
+  or one effect class per duration policy. All three existed and all three were
+  collapsed; the changelog says why.
 - Using gameplay cues as authoritative gameplay logic.
-- Storing per-actor runtime values in ScriptableObject assets.
-- Adding reflection-heavy or generated APIs without a measured authoring benefit.
-- Claiming multiplayer prediction, persistence, or production readiness before tests prove it.
+- Storing per-actor runtime values in `ScriptableObject` assets.
+- Adding reflection-heavy or generated APIs without a measured authoring
+  benefit.
