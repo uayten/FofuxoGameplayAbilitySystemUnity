@@ -71,7 +71,11 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private TargetAssistDefinition targetAssist;
 
         [Header("Activation")]
-        [SerializeField, Min(0f)] private float cooldown;
+        [Tooltip("When the cost is paid and the cooldown starts. On Activation commits as the ability starts; Manual waits for the ability to call TryCommitAbility, like CommitAbility in Unreal's GAS.")]
+        [SerializeField] private AbilityCommitPolicy commitPolicy;
+        [Tooltip("Cooldown Gameplay Effect: a Duration effect applied to the owner, whose granted tags mean 'on cooldown' for as long as it lasts. Empty means no cooldown.")]
+        [SerializeField] private GameplayEffectDefinition cooldownGameplayEffect;
+        [Tooltip("Whether the cooldown effect is applied on commit or when the activation completes.")]
         [SerializeField] private AbilityCooldownStartPolicy cooldownStartPolicy;
         [Tooltip("Which cancel requests may interrupt this ability.")]
         [SerializeField] private AbilityCancelPolicy cancelPolicy;
@@ -94,7 +98,10 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AbilityActivationTrigger[] activationTriggers = { };
 
         [Header("Costs and Charges")]
-        [SerializeField] private AbilityCost[] costs = { };
+        [Tooltip("Cost Gameplay Effect: an Instant effect applied to the owner on commit. Activation is refused when its additive modifiers would take an attribute below its minimum, the CheckCost rule of Unreal's GAS. Empty means free.")]
+        [SerializeField] private GameplayEffectDefinition costGameplayEffect;
+        [Tooltip("Seconds between further payments of the cost while the activation runs, for a sprint or a channel. The first one that cannot be paid ends the activation with Cancel.InsufficientCost. Zero pays once.")]
+        [SerializeField, Min(0f)] private float costPeriod;
         [Tooltip("Charges available before the restore timer refills them. Zero means unlimited.")]
         [SerializeField, Min(0)] private int maxCharges;
         [Tooltip("Seconds to restore one charge. Zero restores all charges at once after the cooldown elapses.")]
@@ -104,6 +111,10 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private GameplayTag[] requiredTags = { };
         [SerializeField] private GameplayTag[] blockedTags = { };
         [SerializeField] private GameplayTag[] grantedTags = { };
+
+        [Header("Active Effects")]
+        [Tooltip("Duration or infinite effects applied to the owner when the ability activates and removed when it ends, completed or cancelled: a speed buff, a periodic drain.")]
+        [SerializeField] private GameplayEffectDefinition[] activeEffects = { };
 
         [Header("Reactive Effects")]
         [Tooltip("Applied to the owner on a successful parry while this ability is active (e.g. the block heal). The numbers live here, not in components.")]
@@ -137,12 +148,28 @@ namespace Fofuxo.GameplayAbilitySystem
         public virtual bool RequiresMotor =>
             targetAssist != null && targetAssist.ApproachTarget;
 
-        public float Cooldown => Mathf.Max(0f, cooldown);
+        public AbilityCommitPolicy CommitPolicy => commitPolicy;
+        /// <summary>The effect whose granted tags mean this ability is on cooldown.</summary>
+        public GameplayEffectDefinition CooldownGameplayEffect => cooldownGameplayEffect;
+        /// <summary>The tags that mean "on cooldown": the cooldown effect's granted tags.</summary>
+        public IReadOnlyList<GameplayTag> CooldownTags =>
+            cooldownGameplayEffect != null
+                ? cooldownGameplayEffect.GrantedTags
+                : Array.Empty<GameplayTag>();
         public AbilityCooldownStartPolicy CooldownStartPolicy => cooldownStartPolicy;
-        public IReadOnlyList<AbilityCost> Costs => costs;
+        /// <summary>The instant effect paid on commit, and again every <see cref="CostPeriod"/>.</summary>
+        public GameplayEffectDefinition CostGameplayEffect => costGameplayEffect;
+        /// <summary>Seconds between repeated payments while active; zero pays once.</summary>
+        public float CostPeriod => costGameplayEffect != null ? Mathf.Max(0f, costPeriod) : 0f;
         public int MaxCharges => Mathf.Max(0, maxCharges);
         public float ChargeRestoreTime => Mathf.Max(0f, chargeRestoreTime);
         public bool HasLimitedCharges => MaxCharges > 0;
+        /// <summary>
+        /// Effects that live exactly as long as an activation: applied to the
+        /// owner on activation, removed when it ends.
+        /// </summary>
+        public IReadOnlyList<GameplayEffectDefinition> ActiveEffects =>
+            activeEffects ?? Array.Empty<GameplayEffectDefinition>();
         public bool LockMovementDuringAbility => lockMovementDuringAbility;
         public AbilityActivationInputPolicy ActivationInputPolicy => activationInputPolicy;
         public float ActivationHoldDuration => Mathf.Max(0f, activationHoldDuration);
@@ -250,6 +277,38 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
+        /// A rule of the game's own that decides whether this ability may start
+        /// now — "the inventory has room", "there is something to pull". The
+        /// override point of Unreal's <c>CanActivateAbility</c>: asked after
+        /// every package check has passed, by <c>EvaluateActivation</c>,
+        /// <c>CanActivate</c> and every attempt alike; a refusal is reported as
+        /// <see cref="AbilityActivationRejection.ConditionNotMet"/> with
+        /// <paramref name="reason"/> as its message.
+        ///
+        /// It is a question, so it must be side-effect free and give the same
+        /// answer when asked twice in a row. Work that decides *what* to act on
+        /// belongs in <see cref="OnActivated"/>.
+        /// </summary>
+        protected internal virtual bool CanActivateAbility(
+            AbilitySystem system, in AbilityContext context, out string reason)
+        {
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Called on every spec this ability makes for its own effects — the
+        /// cost, the cooldown and the Active Effects — before it is checked or
+        /// applied. The place to set Set By Caller magnitudes from the ability's
+        /// own fields, so a sprint's speed and its stamina per second live on
+        /// the sprint and the effects stay generic. Must not have side effects
+        /// beyond the spec: a cost check makes a spec it never applies.
+        /// </summary>
+        protected internal virtual void ConfigureOutgoingSpec(GameplayEffectSpec spec)
+        {
+        }
+
+        /// <summary>
         /// Whether the asset is authored well enough to run, with the first
         /// problem found in the error. The Inspector and the activation path
         /// ask the same question.
@@ -270,23 +329,54 @@ namespace Fofuxo.GameplayAbilitySystem
                 return false;
             }
 
-            for (int i = 0; i < costs.Length; i++)
+            if (costGameplayEffect != null)
             {
-                AbilityCost cost = costs[i];
-                if (cost.Attribute.IsEmpty)
+                if (costGameplayEffect.DurationPolicy != GameplayEffectDurationPolicy.Instant)
                 {
-                    error = $"Cost {i + 1} has no attribute assigned.";
+                    error =
+                        $"Cost effect '{costGameplayEffect.name}' is not Instant. A cost is " +
+                        "paid, not held: use Cost Period to pay it again while active.";
                     return false;
                 }
 
-                if (cost.Amount <= 0f)
+                if (!costGameplayEffect.TryValidate(out string costError))
                 {
-                    error = $"Cost {i + 1} must be greater than zero.";
+                    error = $"Cost effect '{costGameplayEffect.name}' is invalid: {costError}";
+                    return false;
+                }
+            }
+            else if (costPeriod > 0f)
+            {
+                error = "Cost Period is set but there is no Cost Gameplay Effect to pay.";
+                return false;
+            }
+
+            if (cooldownGameplayEffect != null)
+            {
+                if (cooldownGameplayEffect.DurationPolicy != GameplayEffectDurationPolicy.Duration)
+                {
+                    error =
+                        $"Cooldown effect '{cooldownGameplayEffect.name}' must use the " +
+                        "Duration policy: a cooldown ends.";
+                    return false;
+                }
+
+                if (cooldownGameplayEffect.GrantedTags.Count == 0)
+                {
+                    error =
+                        $"Cooldown effect '{cooldownGameplayEffect.name}' grants no tag, " +
+                        "and its granted tags are what mean 'on cooldown'.";
+                    return false;
+                }
+
+                if (!cooldownGameplayEffect.TryValidate(out string cooldownError))
+                {
+                    error = $"Cooldown effect '{cooldownGameplayEffect.name}' is invalid: {cooldownError}";
                     return false;
                 }
             }
 
-            if (HasLimitedCharges && ChargeRestoreTime <= 0f && Cooldown <= 0f)
+            if (HasLimitedCharges && ChargeRestoreTime <= 0f && cooldownGameplayEffect == null)
             {
                 error = "Limited charges require a charge restore time or a cooldown.";
                 return false;
@@ -319,6 +409,32 @@ namespace Fofuxo.GameplayAbilitySystem
                 if (triggers[i].Tag.IsEmpty)
                 {
                     error = $"Activation trigger {i + 1} has no tag assigned.";
+                    return false;
+                }
+            }
+
+            IReadOnlyList<GameplayEffectDefinition> whileActive = ActiveEffects;
+            for (int i = 0; i < whileActive.Count; i++)
+            {
+                GameplayEffectDefinition effect = whileActive[i];
+                if (effect == null)
+                {
+                    error = $"Active effect {i + 1} has no effect assigned.";
+                    return false;
+                }
+
+                if (effect.DurationPolicy == GameplayEffectDurationPolicy.Instant)
+                {
+                    error =
+                        $"Active effect {i + 1} ('{effect.name}') is instant, so there " +
+                        "is nothing to remove when the ability ends. Pay it as a Cost " +
+                        "or make it a duration or infinite effect.";
+                    return false;
+                }
+
+                if (!effect.TryValidate(out string activeError))
+                {
+                    error = $"Active effect {i + 1} ('{effect.name}') is invalid: {activeError}";
                     return false;
                 }
             }
@@ -387,7 +503,7 @@ namespace Fofuxo.GameplayAbilitySystem
             abilityId = abilityId?.Trim();
             minimumRange = Mathf.Max(0f, minimumRange);
             maximumRange = Mathf.Max(minimumRange, maximumRange);
-            cooldown = Mathf.Max(0f, cooldown);
+            costPeriod = Mathf.Max(0f, costPeriod);
             chargeRestoreTime = Mathf.Max(0f, chargeRestoreTime);
             maxCharges = Mathf.Max(0, maxCharges);
             activationHoldDuration = Mathf.Max(0f, activationHoldDuration);

@@ -166,10 +166,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
             graph = PlayableGraph.Create("Fofuxo Ability Animation");
             graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
-            mixer = AnimationMixerPlayable.Create(
-                graph,
-                MixerInputCount,
-                true);
+            mixer = AnimationMixerPlayable.Create(graph, MixerInputCount);
 
             output = AnimationPlayableOutput.Create(
                 graph,

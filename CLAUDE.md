@@ -209,9 +209,10 @@ invalidates the field tables in the GAS skills — update
 Two layers, and the line between them is load-bearing.
 
 `AttributeSet` **aggregates and does not decide lifetimes**: base values,
-limits, deterministic `Add` / `Multiply` / `Override` aggregation, typed change
-events, modifier slots with stable ids, and regeneration. Nothing in it knows
-what a duration is.
+limits (a fixed one or another attribute's current value), deterministic `Add` /
+`Multiply` / `Override` aggregation, typed change events and modifier slots with
+stable ids. Nothing in it knows what a duration or a period is — regeneration is
+an infinite periodic effect, usually granted by the loadout.
 
 `GameplayEffectContainer` **owns every lifetime**: application gating, instant
 execution, duration, periods, stacking, overflow, immunity, granted tags and
@@ -227,6 +228,15 @@ removal, one `GameplayEffectSpec` per application and one
   that is the container asking to be used.
 - Add generated accessors or further aggregation modes only with tests and a
   demonstrated use case.
+
+**Paying for an ability is effects, the way Unreal's GAS does it.** The cost is
+an Instant `Cost Gameplay Effect`, checked by `CheckCost` (no additive modifier
+may take an attribute below its minimum) and applied on commit, and again every
+`Cost Period` for a channel or a sprint. The cooldown is a Duration `Cooldown
+Gameplay Effect` whose granted tags mean "on cooldown". Commit is its own step
+(`AbilityCommitPolicy`, `TryCommitAbility`). An ability's own numbers reach its
+effects as Set By Caller magnitudes filled in `ConfigureOutgoingSpec`. Do not
+bring back a cost field or a cooldown timer beside them.
 
 **One effect asset.** `GameplayEffectDefinition` is concrete: an effect that
 only changes attributes and tags needs no subclass. Subclass it only for a
@@ -290,14 +300,16 @@ same change instead of preserving instructions that describe an older version.
 
 ## Development host
 
-The package is developed inside MyDragonShop, where this repository is a git
-submodule at `Packages/com.uayten.fofuxogameplayabilitysystem`. Unity treats it
-as an embedded package, so it is editable there; commits and tags are made in
-the submodule and pushed here, and MyDragonShop commits the submodule pointer.
+The package is developed inside MyDragonShop, vendored as a plain folder at
+`Packages/com.uayten.fofuxogameplayabilitysystem` with no `.git` of its own. A
+MyDragonShop commit is the only record of a change until it is ported by hand
+into `uayten/FofuxoGameplayAbilitySystemUnity`, whose local clone lives in
+`OneDrive/Documentos/GitHub/`. Port at milestones, when the owner asks, not per
+change.
 
 Every other project, BossRush included, consumes a tagged release by git URL
 (`https://github.com/uayten/FofuxoGameplayAbilitySystemUnity.git#vX.Y.Z`) and
-is read-only there. To release: move `[Unreleased]` in `CHANGELOG.md` under a
-version heading, bump `version` in `package.json` to match, commit, tag
-`vX.Y.Z`, and push the branch and the tag. A consumer picks it up by changing
-the tag in its `Packages/manifest.json`.
+is read-only there. To release: copy the vendored folder over the clone, move
+`[Unreleased]` in `CHANGELOG.md` under a version heading, bump `version` in
+`package.json` to match, commit, tag `vX.Y.Z`, and push the branch and the tag.
+A consumer picks it up by changing the tag in its `Packages/manifest.json`.

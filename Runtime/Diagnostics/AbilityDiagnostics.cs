@@ -30,10 +30,22 @@ namespace Fofuxo.GameplayAbilitySystem
         internal static readonly ProfilerMarker TaskMarker = new("GAS.Task");
 
         private static bool enabled =
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if UNITY_EDITOR
             true;
 #else
             false;
+
+        // A player learns whether it is a development build at runtime: the
+        // DEVELOPMENT_BUILD directive is deprecated, since one managed code
+        // variant may serve both kinds of build. This runs before any scene
+        // loads, and outside a static initializer, where engine calls are
+        // not allowed from every context.
+        [UnityEngine.RuntimeInitializeOnLoadMethod(
+            UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ApplyPlayerDefault()
+        {
+            enabled = UnityEngine.Debug.isDebugBuild;
+        }
 #endif
 
         private static ProfilerRecorder allocationRecorder;

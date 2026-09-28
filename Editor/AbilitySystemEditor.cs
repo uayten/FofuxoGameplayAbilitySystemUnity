@@ -120,7 +120,7 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
 
             using (new EditorGUI.IndentLevelScope())
             {
-                DrawSiblingProperties(attributes, "definition", "initialValues", "regeneration");
+                DrawSiblingProperties(attributes, "definition", "initialValues");
             }
         }
 

@@ -16,8 +16,8 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private AbilityLoadout loadout;
         [SerializeField] private Animator animator;
 
-        private readonly Dictionary<AbilityDefinition, float> cooldownEndTimes = new();
         private readonly Dictionary<GameplayTag, int> grantedTagCounts = new();
+        private readonly Dictionary<AbilityDefinition, GameplayEffectSpec> costCheckSpecs = new();
         private readonly Dictionary<GameplayTag, int> activeWindowTagCounts = new();
         private readonly HashSet<GameplayTag> looseTags = new();
         private readonly List<GameplayCueTrigger> firedCues = new();
@@ -389,6 +389,11 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
+        private void Start()
+        {
+            GrantLoadoutEffects();
+        }
+
         private void OnEnable()
         {
             animationPlayer ??= new AbilityAnimationPlayer(animator);
@@ -479,6 +484,11 @@ namespace Fofuxo.GameplayAbilitySystem
             if (instance.Definition.RequiresTarget && instance.Context.Target == null)
             {
                 ForceCancelAbility(instance, CommonGameplayTags.CancelTargetLost);
+                return;
+            }
+
+            if (!TickPeriodicCost(instance, deltaTime))
+            {
                 return;
             }
 
@@ -862,8 +872,9 @@ namespace Fofuxo.GameplayAbilitySystem
             return true;
         }
         /// <summary>
-        /// Completes the primary activation, but only when it is the ability
-        /// named. False when something else was running.
+        /// Completes the running activation of the ability named, whether or
+        /// not it is the primary one, so an ability that runs alongside others
+        /// can end itself. False when that ability is not running.
         /// </summary>
         public bool TryCompleteActiveAbility(AbilityDefinition expectedAbility)
         {
@@ -1611,20 +1622,315 @@ namespace Fofuxo.GameplayAbilitySystem
 
             notifyBuffer.AddRange(actorTasks.Tasks);
         }
-        /// <summary>Whether the ability's cooldown has not elapsed yet.</summary>
+        /// <summary>
+        /// Whether the ability is on cooldown: the owner holds one of the tags
+        /// its Cooldown Gameplay Effect grants, whatever applied it.
+        /// </summary>
         public bool IsOnCooldown(AbilityDefinition ability)
         {
-            return ability != null &&
-                   cooldownEndTimes.TryGetValue(ability, out float endTime) &&
-                   Time.time < endTime;
+            if (ability == null)
+            {
+                return false;
+            }
+
+            IReadOnlyList<GameplayTag> cooldownTags = ability.CooldownTags;
+            for (int i = 0; i < cooldownTags.Count; i++)
+            {
+                if (HasTag(cooldownTags[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
+
         /// <returns>Seconds left on the cooldown, or zero when it is ready.</returns>
         public float GetCooldownRemaining(AbilityDefinition ability)
         {
-            return ability != null &&
-                   cooldownEndTimes.TryGetValue(ability, out float endTime)
-                ? Mathf.Max(0f, endTime - Time.time)
-                : 0f;
+            GetCooldownTimeRemainingAndDuration(ability, out float remaining, out _);
+            return remaining;
+        }
+
+        /// <summary>
+        /// The longest-running active effect that grants one of the ability's
+        /// cooldown tags: how long is left on it and how long it lasts in
+        /// total, the pair a cooldown display needs. Both zero when ready.
+        /// Named after Unreal's <c>GetCooldownTimeRemainingAndDuration</c>.
+        /// </summary>
+        public void GetCooldownTimeRemainingAndDuration(
+            AbilityDefinition ability, out float remaining, out float duration)
+        {
+            remaining = 0f;
+            duration = 0f;
+            GameplayEffectContainer container = GameplayEffectContainer.Find(gameObject);
+            if (ability == null || container == null)
+            {
+                return;
+            }
+
+            IReadOnlyList<GameplayTag> cooldownTags = ability.CooldownTags;
+            IReadOnlyList<ActiveGameplayEffect> effects = container.ActiveEffects;
+            for (int i = 0; i < effects.Count; i++)
+            {
+                ActiveGameplayEffect effect = effects[i];
+                if (effect.IsInfinite || effect.RemainingDuration <= remaining ||
+                    !GrantsAny(effect, cooldownTags))
+                {
+                    continue;
+                }
+
+                remaining = effect.RemainingDuration;
+                duration = effect.TotalDuration;
+            }
+        }
+
+        private static bool GrantsAny(ActiveGameplayEffect effect, IReadOnlyList<GameplayTag> tags)
+        {
+            IReadOnlyList<GameplayTag> granted = effect.Definition != null
+                ? effect.Definition.GrantedTags
+                : null;
+            for (int t = 0; t < tags.Count; t++)
+            {
+                if (granted != null)
+                {
+                    for (int g = 0; g < granted.Count; g++)
+                    {
+                        if (granted[g] == tags[t])
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                IReadOnlyList<GameplayTag> dynamic = effect.Spec.DynamicGrantedTags;
+                for (int g = 0; g < dynamic.Count; g++)
+                {
+                    if (dynamic[g] == tags[t])
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        // ------------------------------------------------------------- commit
+
+        /// <summary>
+        /// Whether the ability's Cost Gameplay Effect can be paid now: none of
+        /// its additive modifiers would take an attribute below its minimum.
+        /// Unreal's <c>CheckCost</c>. A question — the spec it evaluates is
+        /// never applied. An owner immune to the cost effect pays nothing, so
+        /// it can always pay.
+        /// </summary>
+        public bool CheckCost(AbilityDefinition ability)
+        {
+            return CheckCost(ability, AbilityContext.FromTarget(gameObject, null), out _);
+        }
+
+        private bool CheckCost(AbilityDefinition ability, AbilityContext context, out string reason)
+        {
+            reason = null;
+            GameplayEffectDefinition cost = ability != null ? ability.CostGameplayEffect : null;
+            if (cost == null)
+            {
+                return true;
+            }
+
+            GameplayEffectContainer container = GameplayEffectContainer.Find(gameObject);
+            if (container != null && !container.CanApply(cost))
+            {
+                return true;
+            }
+
+            TryGetComponent(out AttributeSet attributeSet);
+            GameplayEffectSpec spec = CostCheckSpec(ability, cost, context);
+            spec.CaptureSnapshots();
+            spec.CalculateMagnitudes();
+            for (int i = 0; i < spec.ModifierCount; i++)
+            {
+                GameplayEffectModifier modifier = spec.GetModifier(i);
+                if (modifier.IsEmpty || modifier.Operation != AttributeOperation.Add)
+                {
+                    continue;
+                }
+
+                float magnitude = spec.ModifierMagnitudes[i];
+                if (magnitude >= 0f)
+                {
+                    continue;
+                }
+
+                float current = attributeSet != null ? attributeSet.GetCurrent(modifier.Attribute) : 0f;
+                float minimum = attributeSet != null ? attributeSet.GetMinimum(modifier.Attribute) : 0f;
+                if (current + magnitude < minimum)
+                {
+                    reason = $"Insufficient {modifier.Attribute} for the cost: needs {-magnitude:0.##}, has {current:0.##}.";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Commits a running activation that uses the Manual commit policy:
+        /// checks the cost and the cooldown again, then pays the cost, spends a
+        /// charge and applies a commit-time cooldown. Unreal's
+        /// <c>CommitAbility</c>. A refused commit ends the activation with
+        /// <see cref="CommonGameplayTags.CancelCommitFailed"/>. True when the
+        /// ability is committed, including when it already was.
+        /// </summary>
+        public bool TryCommitAbility(AbilityDefinition ability)
+        {
+            AbilityInstance instance = FindInstance(ability);
+            if (instance == null)
+            {
+                return false;
+            }
+
+            if (instance.IsCommitted)
+            {
+                return true;
+            }
+
+            if (IsOnCooldown(ability) || !CheckCost(ability, instance.Context, out _))
+            {
+                ForceCancelAbility(instance, CommonGameplayTags.CancelCommitFailed);
+                return false;
+            }
+
+            CommitInternal(instance);
+            return true;
+        }
+
+        private void CommitInternal(AbilityInstance instance)
+        {
+            AbilityDefinition ability = instance.Definition;
+            instance.IsCommitted = true;
+            ApplyCost(instance);
+            instance.CostPeriodRemaining = ability.CostPeriod;
+            ConsumeCharge(ability);
+            if (ability.CooldownStartPolicy == AbilityCooldownStartPolicy.OnCommit)
+            {
+                ApplyCooldown(ability, instance.Context);
+            }
+        }
+
+        private void ApplyCost(AbilityInstance instance)
+        {
+            GameplayEffectDefinition cost = instance.Definition.CostGameplayEffect;
+            GameplayEffectContainer container = cost != null ? GameplayEffectContainer.For(gameObject) : null;
+            if (container != null)
+            {
+                container.Apply(MakeOutgoingSpec(instance.Definition, cost, instance.Context));
+            }
+        }
+
+        private void ApplyCooldown(AbilityDefinition ability, AbilityContext context)
+        {
+            GameplayEffectDefinition cooldown = ability.CooldownGameplayEffect;
+            GameplayEffectContainer container = cooldown != null ? GameplayEffectContainer.For(gameObject) : null;
+            if (container != null)
+            {
+                container.Apply(MakeOutgoingSpec(ability, cooldown, context));
+            }
+        }
+
+        /// <summary>
+        /// Pays the next installment of a periodic cost when it comes due. The
+        /// first one that cannot be paid ends the activation.
+        /// </summary>
+        /// <returns>False when the activation was ended.</returns>
+        private bool TickPeriodicCost(AbilityInstance instance, float deltaTime)
+        {
+            AbilityDefinition ability = instance.Definition;
+            float period = ability.CostPeriod;
+            if (!instance.IsCommitted || period <= 0f)
+            {
+                return true;
+            }
+
+            instance.CostPeriodRemaining -= deltaTime;
+            while (instance.CostPeriodRemaining <= 0f)
+            {
+                if (!CheckCost(ability, instance.Context, out _))
+                {
+                    ForceCancelAbility(instance, CommonGameplayTags.CancelInsufficientCost);
+                    return false;
+                }
+
+                ApplyCost(instance);
+                instance.CostPeriodRemaining += period;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The spec a cost check evaluates, one per ability and reused: an AI
+        /// asks <c>EvaluateActivation</c> for every granted ability every frame,
+        /// and that question must not allocate. It is never applied.
+        /// </summary>
+        private GameplayEffectSpec CostCheckSpec(
+            AbilityDefinition ability, GameplayEffectDefinition cost, AbilityContext context)
+        {
+            if (!costCheckSpecs.TryGetValue(ability, out GameplayEffectSpec spec) ||
+                spec.Definition != cost)
+            {
+                spec = MakeOutgoingSpec(ability, cost, context);
+                costCheckSpecs[ability] = spec;
+                return spec;
+            }
+
+            ability.ConfigureOutgoingSpec(spec);
+            return spec;
+        }
+
+        /// <summary>
+        /// A spec for one of the ability's own effects, applied by and to the
+        /// owner, handed to <see cref="AbilityDefinition.ConfigureOutgoingSpec"/>
+        /// so the ability can fill its Set By Caller magnitudes.
+        /// </summary>
+        private GameplayEffectSpec MakeOutgoingSpec(
+            AbilityDefinition ability, GameplayEffectDefinition effect, AbilityContext context)
+        {
+            var effectContext = new GameplayEffectContext(this, in context, ability);
+            var spec = new GameplayEffectSpec(effect, in effectContext, gameObject, default);
+            ability.ConfigureOutgoingSpec(spec);
+            return spec;
+        }
+
+        /// <summary>
+        /// Applies the loadout's Granted Gameplay Effects that are not already
+        /// on the owner. Runs when the system starts and after a save restore,
+        /// so an effect the record did not carry comes back all the same and
+        /// one it did is not applied twice.
+        /// </summary>
+        internal void GrantLoadoutEffects()
+        {
+            IReadOnlyList<GameplayEffectDefinition> effects =
+                loadout != null ? loadout.GrantedEffects : null;
+            if (effects == null || effects.Count == 0)
+            {
+                return;
+            }
+
+            GameplayEffectContainer container = GameplayEffectContainer.For(gameObject);
+            AbilityContext context = AbilityContext.FromTarget(gameObject, gameObject);
+            for (int i = 0; i < effects.Count; i++)
+            {
+                GameplayEffectDefinition effect = effects[i];
+                if (effect == null || container.IsActive(effect))
+                {
+                    continue;
+                }
+
+                var effectContext = new GameplayEffectContext(this, in context);
+                container.Apply(new GameplayEffectSpec(effect, in effectContext, gameObject, default));
+            }
         }
         /// <summary>
         /// Whether the actor holds a tag from any source: loose, granted by an
@@ -2043,16 +2349,9 @@ namespace Fofuxo.GameplayAbilitySystem
                     AbilityActivationRejection.NoChargesLeft, "Ability has no charges left.");
             }
 
-            AttributeSet attributeSet =
-                context.Owner != null ? context.Owner.GetComponent<AttributeSet>() : null;
-            foreach (AbilityCost cost in ability.Costs)
+            if (!CheckCost(ability, context, out string costReason))
             {
-                if (attributeSet == null || attributeSet.GetCurrent(cost.Attribute) < cost.Amount)
-                {
-                    return Reject(
-                        AbilityActivationRejection.InsufficientAttribute,
-                        $"Insufficient attribute for cost: {cost.Attribute}.");
-                }
+                return Reject(AbilityActivationRejection.InsufficientAttribute, costReason);
             }
 
             foreach (GameplayTag requiredTag in ability.RequiredTags)
@@ -2108,7 +2407,75 @@ namespace Fofuxo.GameplayAbilitySystem
                 }
             }
 
+            if (!ability.CanActivateAbility(this, in context, out string conditionReason))
+            {
+                return Reject(
+                    AbilityActivationRejection.ConditionNotMet,
+                    string.IsNullOrEmpty(conditionReason)
+                        ? "The ability's activation condition is not met."
+                        : conditionReason);
+            }
+
             return AbilityActivationResult.Accepted;
+        }
+
+
+        /// <summary>
+        /// Applies the ability's Active Effects to the owner and keeps their
+        /// handles on the activation, so ending it removes exactly these.
+        /// </summary>
+        private void ApplyActiveEffects(AbilityInstance instance)
+        {
+            IReadOnlyList<GameplayEffectDefinition> effects = instance.Definition.ActiveEffects;
+            if (effects.Count == 0)
+            {
+                return;
+            }
+
+            GameplayEffectContainer container = GameplayEffectContainer.For(gameObject);
+            if (container == null)
+            {
+                Debug.LogWarning(
+                    $"'{instance.Definition.AbilityId}' has Active Effects but " +
+                    $"'{name}' has no GameplayEffectContainer to hold them.",
+                    this);
+                return;
+            }
+
+            for (int i = 0; i < effects.Count; i++)
+            {
+                if (effects[i] == null)
+                {
+                    continue;
+                }
+
+                GameplayEffectSpec spec = MakeOutgoingSpec(instance.Definition, effects[i], instance.Context);
+                GameplayEffectApplicationResult result = container.Apply(spec);
+                if (result.Handle.IsValid)
+                {
+                    instance.AddActiveEffectHandle(result.Handle);
+                }
+            }
+        }
+
+        private void RemoveActiveEffects(AbilityInstance instance)
+        {
+            List<GameplayEffectHandle> handles = instance.TakeActiveEffectHandles();
+            if (handles == null)
+            {
+                return;
+            }
+
+            GameplayEffectContainer container = GameplayEffectContainer.For(gameObject);
+            if (container == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < handles.Count; i++)
+            {
+                container.TryRemove(handles[i]);
+            }
         }
 
         private static AbilityActivationResult Reject(
@@ -2264,12 +2631,10 @@ namespace Fofuxo.GameplayAbilitySystem
                 resolvedContext,
                 assistApproachDistance);
             AddGrantedTags(ability);
-            PayCosts(ability, resolvedContext);
-            ConsumeCharge(ability);
-
-            if (ability.CooldownStartPolicy == AbilityCooldownStartPolicy.OnActivation)
+            ApplyActiveEffects(instance);
+            if (ability.CommitPolicy == AbilityCommitPolicy.OnActivation)
             {
-                StartCooldown(ability);
+                CommitInternal(instance);
             }
 
             PlayStepAnimation(instance.Step);
@@ -2312,6 +2677,7 @@ namespace Fofuxo.GameplayAbilitySystem
             instance.CloseTagWindows(closedWindowTags);
             ApplyTagWindowChanges();
             RemoveGrantedTags(ability);
+            RemoveActiveEffects(instance);
 
             // The hook runs while the activation is still the running one and
             // after its tags have come off, which is the order derived abilities
@@ -2341,9 +2707,10 @@ namespace Fofuxo.GameplayAbilitySystem
             AbilityContext completedContext =
                 EndActivation(instance, false, default, reason);
 
-            if (completedAbility.CooldownStartPolicy == AbilityCooldownStartPolicy.OnCompletion)
+            if (instance.IsCommitted &&
+                completedAbility.CooldownStartPolicy == AbilityCooldownStartPolicy.OnCompletion)
             {
-                StartCooldown(completedAbility);
+                ApplyCooldown(completedAbility, completedContext);
             }
 
             if (AbilityDiagnostics.Enabled)
@@ -2396,25 +2763,6 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         internal IReadOnlyCollection<GameplayTag> LooseTags => looseTags;
 
-        /// <summary>
-        /// Puts an ability back on cooldown with the remaining time a record
-        /// carried. Zero or less clears it.
-        /// </summary>
-        internal void RestoreCooldown(AbilityDefinition ability, float remainingSeconds)
-        {
-            if (ability == null)
-            {
-                return;
-            }
-
-            if (remainingSeconds <= 0f)
-            {
-                cooldownEndTimes.Remove(ability);
-                return;
-            }
-
-            cooldownEndTimes[ability] = Time.time + remainingSeconds;
-        }
 
         /// <summary>
         /// Puts a charge pool back. A full pool is stored as no entry at all,
@@ -2442,13 +2790,13 @@ namespace Fofuxo.GameplayAbilitySystem
         }
 
         /// <summary>
-        /// Clears exactly what a record carries - cooldowns, charges and loose
-        /// tags - so a load replaces the actor's state instead of layering onto
-        /// it. Running activations are not touched; they are not saved either.
+        /// Clears exactly what a record carries here - charges and loose tags;
+        /// cooldowns are effects and go with the container - so a load replaces
+        /// the actor's state instead of layering onto it. Running activations
+        /// are not touched; they are not saved either.
         /// </summary>
         internal void ClearSavedState()
         {
-            cooldownEndTimes.Clear();
             charges.Clear();
             chargeRestoreTimers.Clear();
             foreach (GameplayTag tag in new List<GameplayTag>(looseTags))
@@ -2457,13 +2805,6 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
-        private void StartCooldown(AbilityDefinition ability)
-        {
-            if (ability.Cooldown > 0f)
-            {
-                cooldownEndTimes[ability] = Time.time + ability.Cooldown;
-            }
-        }
 
         /// <summary>
         /// Charges left on an ability, or positive infinity for one without a
@@ -2544,25 +2885,6 @@ namespace Fofuxo.GameplayAbilitySystem
             }
         }
 
-        private void PayCosts(AbilityDefinition ability, AbilityContext context)
-        {
-            if (ability.Costs.Count == 0 || context.Owner == null)
-            {
-                return;
-            }
-
-            AttributeSet attributeSet = context.Owner.GetComponent<AttributeSet>();
-            if (attributeSet == null)
-            {
-                return;
-            }
-
-            foreach (AbilityCost cost in ability.Costs)
-            {
-                attributeSet.ApplyInstantModifier(new AttributeModifier(
-                    cost.Attribute, AttributeOperation.Add, -cost.Amount, context.Owner));
-            }
-        }
 
         /// <summary>
         /// Applies pending window changes as one batch. Closes run before opens,

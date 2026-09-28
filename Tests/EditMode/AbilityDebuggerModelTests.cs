@@ -189,7 +189,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void DescribeReadiness_ReportsCooldownAndCharges()
         {
             AbilityDefinition ability = NewAbility("test.charged");
-            SetField(ability, "cooldown", 3600f);
+            TestEffects.SetCooldown(owned, ability, 3600f);
             SetField(ability, "maxCharges", 2);
             SetField(ability, "chargeRestoreTime", 3600f);
             GrantAll(ability);

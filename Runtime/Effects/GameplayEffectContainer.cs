@@ -82,7 +82,11 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>The container on this actor, or null when it has none. Never adds one.</summary>
         public static GameplayEffectContainer Find(GameObject actor)
         {
-            return actor != null ? actor.GetComponent<GameplayEffectContainer>() : null;
+            // TryGetComponent: in the Editor a GetComponent that finds nothing
+            // allocates, and a cooldown query runs on actors that never had an effect.
+            return actor != null && actor.TryGetComponent(out GameplayEffectContainer container)
+                ? container
+                : null;
         }
 
         private void Awake()
@@ -280,6 +284,25 @@ namespace Fofuxo.GameplayAbilitySystem
                    count > 0;
         }
 
+        /// <summary>True while any application of this effect is live here.</summary>
+        public bool IsActive(GameplayEffectDefinition definition)
+        {
+            if (definition == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < activeEffects.Count; i++)
+            {
+                if (activeEffects[i].Definition == definition)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>True while the handle names an effect that is still live here.</summary>
         public bool IsActive(GameplayEffectHandle handle)
         {
@@ -471,13 +494,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void TickEffect(ActiveGameplayEffect effect, float step)
         {
-            if (effect.Spec.HasLiveMagnitudes)
+            UpdateInhibition(effect);
+
+            if (!effect.IsInhibited && effect.Spec.HasLiveMagnitudes)
             {
                 effect.Spec.CalculateMagnitudes();
                 RewriteModifierSlots(effect);
             }
 
-            if (effect.IsPeriodic)
+            if (effect.IsPeriodic && !effect.IsInhibited)
             {
                 float consumed = effect.IsInfinite
                     ? step
@@ -523,8 +548,13 @@ namespace Fofuxo.GameplayAbilitySystem
             GameplayEffectHandle handle = GameplayEffectHandle.Next();
             ActiveGameplayEffect effect = new(handle, spec);
             activeEffects.Add(effect);
+            effect.IsInhibited = !MeetsOngoingTagRequirements(spec.Definition);
 
-            if (!effect.IsPeriodic)
+            if (effect.IsInhibited)
+            {
+                // Applied, but off: nothing to contribute until the tags allow it.
+            }
+            else if (!effect.IsPeriodic)
             {
                 RewriteModifierSlots(effect);
             }
@@ -576,7 +606,8 @@ namespace Fofuxo.GameplayAbilitySystem
             };
 
             activeEffects.Add(effect);
-            if (!effect.IsPeriodic)
+            effect.IsInhibited = !MeetsOngoingTagRequirements(spec.Definition);
+            if (!effect.IsPeriodic && !effect.IsInhibited)
             {
                 RewriteModifierSlots(effect);
             }
@@ -585,6 +616,82 @@ namespace Fofuxo.GameplayAbilitySystem
             AddPersistentCue(effect);
             EffectApplied?.Invoke(effect);
             return effect;
+        }
+
+        /// <summary>
+        /// Whether the target currently meets the effect's Ongoing Tag
+        /// Requirements. Asked on application and on every tick, so an effect
+        /// switches on or off at most one frame after the tags change.
+        /// </summary>
+        private bool MeetsOngoingTagRequirements(GameplayEffectDefinition definition)
+        {
+            if (definition == null || !definition.HasOngoingTagRequirements)
+            {
+                return true;
+            }
+
+            IReadOnlyList<GameplayTag> required = definition.OngoingRequiredTags;
+            for (int i = 0; i < required.Count; i++)
+            {
+                if (!HasTag(required[i]))
+                {
+                    return false;
+                }
+            }
+
+            IReadOnlyList<GameplayTag> blocked = definition.OngoingBlockedTags;
+            for (int i = 0; i < blocked.Count; i++)
+            {
+                if (HasTag(blocked[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Switches an effect off or back on when its Ongoing Tag Requirements
+        /// change: off detaches its modifiers, on attaches them again. A
+        /// periodic effect keeps its accumulator, so it resumes where it paused.
+        /// </summary>
+        private void UpdateInhibition(ActiveGameplayEffect effect)
+        {
+            bool inhibited = !MeetsOngoingTagRequirements(effect.Definition);
+            if (inhibited == effect.IsInhibited)
+            {
+                return;
+            }
+
+            effect.IsInhibited = inhibited;
+            if (effect.IsPeriodic)
+            {
+                return;
+            }
+
+            if (inhibited)
+            {
+                DetachModifierSlots(effect);
+            }
+            else
+            {
+                RewriteModifierSlots(effect);
+            }
+        }
+
+        private void DetachModifierSlots(ActiveGameplayEffect effect)
+        {
+            Resolve();
+            if (attributeSet != null)
+            {
+                for (int i = 0; i < effect.modifierSlots.Count; i++)
+                {
+                    attributeSet.RemoveModifier(effect.modifierSlots[i]);
+                }
+            }
+
+            effect.modifierSlots.Clear();
         }
 
         private GameplayEffectApplicationResult Stack(
@@ -679,6 +786,33 @@ namespace Fofuxo.GameplayAbilitySystem
                 GameplayEffectApplicationOutcome.Overflowed, effect.Handle);
         }
 
+        /// <summary>
+        /// Same attributes and operations, in the same order. Magnitudes may
+        /// differ: a refresh adopts the newest spec's numbers.
+        /// </summary>
+        private static bool HaveSameDynamicModifiers(
+            GameplayEffectSpec existing, GameplayEffectSpec incoming)
+        {
+            IReadOnlyList<GameplayEffectModifier> a = existing != null
+                ? existing.DynamicModifiers
+                : System.Array.Empty<GameplayEffectModifier>();
+            IReadOnlyList<GameplayEffectModifier> b = incoming.DynamicModifiers;
+            if (a.Count != b.Count)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (a[i].Attribute != b[i].Attribute || a[i].Operation != b[i].Operation)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private ActiveGameplayEffect FindStack(GameplayEffectSpec spec)
         {
             GameplayEffectStacking stacking = spec.Definition.Stacking;
@@ -686,6 +820,15 @@ namespace Fofuxo.GameplayAbilitySystem
             {
                 ActiveGameplayEffect effect = activeEffects[i];
                 if (effect.Definition != spec.Definition)
+                {
+                    continue;
+                }
+
+                // Dynamic applications borrow one shared definition per policy, so
+                // the definition alone does not make two of them the same effect:
+                // their modifiers do. Without this, a second ApplyDynamic on another
+                // attribute refreshed the first and took its modifier away.
+                if (!HaveSameDynamicModifiers(effect.Spec, spec))
                 {
                     continue;
                 }
@@ -710,7 +853,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private void RewriteModifierSlots(ActiveGameplayEffect effect)
         {
             Resolve();
-            if (attributeSet == null || effect.IsPeriodic)
+            if (attributeSet == null || effect.IsPeriodic || effect.IsInhibited)
             {
                 return;
             }

@@ -18,7 +18,8 @@ MonoBehaviour:
   maximumRange: 3
   maximumFacingAngle: 180
   targetAssist: {fileID: 0}
-  cooldown: 1
+  commitPolicy: 0
+  cooldownGameplayEffect: {fileID: 733511961194731107}
   cooldownStartPolicy: 0
   cancelPolicy: 0
   cancelledByTags: []
@@ -29,7 +30,8 @@ MonoBehaviour:
     value: 
   groupExclusionPolicy: 3
   activationTriggers: []
-  costs: []
+  costGameplayEffect: {fileID: 0}
+  costPeriod: 0
   maxCharges: 0
   chargeRestoreTime: 0
   requiredTags: []
@@ -67,3 +69,97 @@ MonoBehaviour:
   stepAdvanceEventTag:
     value: 
   stepTimeoutPolicy: 0
+--- !u!114 &733511961194731107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0bb7b00f6da14b33a02bfa6a104eb7bb, type: 3}
+  m_Name: GE_Cooldown_SampleRoll
+  m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.GameplayEffectDefinition
+  effectId: sample.cooldown.roll
+  targeting:
+    mode: 0
+    shape:
+      kind: 0
+      origin: 0
+      targetLayers:
+        serializedVersion: 2
+        m_Bits: 0
+      localCenter: {x: 0, y: 0, z: 0}
+      localEnd: {x: 0, y: 0, z: 0}
+      halfExtents: {x: 0, y: 0, z: 0}
+      radius: 0
+      coneHalfAngle: 0
+      coneInnerRadius: 0
+    filter:
+      includeOwner: 0
+      includeNonActors: 0
+      includeDead: 0
+      requireLineOfSight: 0
+      lineOfSightBlockers:
+        serializedVersion: 2
+        m_Bits: 0
+      requiredTargetTags: []
+      blockedTargetTags: []
+      maximumCount: 0
+    maximumTargets: 1
+    restrictToAbilityTarget: 0
+  durationPolicy: 1
+  duration:
+    baseValue: 1
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+    setByCallerTag:
+      value: 
+  period:
+    baseValue: 0
+    attribute:
+      id: 
+    capture: 0
+    snapshot: 1
+    coefficient: 0
+    byLevel:
+      serializedVersion: 2
+      m_Curve: []
+      m_PreInfinity: 2
+      m_PostInfinity: 2
+      m_RotationOrder: 4
+    setByCallerTag:
+      value: 
+  executePeriodOnApplication: 1
+  modifiers: []
+  stacking:
+    policy: 1
+    scope: 0
+    limit: 0
+    refreshDurationOnStack: 1
+    resetPeriodOnStack: 0
+    overflowEffects: []
+    denyOverflowApplication: 0
+    clearStackOnOverflow: 0
+  effectTags: []
+  grantedTags:
+  - value: Cooldown.Sample.Roll
+  applicationRequiredTags: []
+  applicationBlockedTags: []
+  grantedImmunityTags: []
+  removeEffectsWithTags: []
+  ongoingRequiredTags: []
+  ongoingBlockedTags: []
+  cueTag:
+    value: 
+  cueReplacements: []

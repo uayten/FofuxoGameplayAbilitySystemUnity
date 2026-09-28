@@ -71,12 +71,12 @@ deprecation policy.
 | --- | --- |
 | Abilities | `AbilityDefinition` assets granted through an `AbilityLoadout`, per-activation `AbilityInstance`, base AI weight; timelines are a subclass (`TimelineAbilityDefinition`) with startup/active/recovery phases, and a plain ability runs until something ends it |
 | Combos | One ability with an ordered `AbilityStep` list; `Automatic`, `Manual`, `OnEvent` and `OnCondition` advancement; frame-gated continuation windows with early input buffering and grace frames; tag-conditional branches that may jump backwards to loop a step; four step-timeout policies |
-| Activation | Required and blocked gameplay tags, minimum/maximum range and facing angle, cooldowns with an on-activation or on-completion start policy, attribute costs, charges with restore time, a motor check for abilities that move their owner, and typed `AbilityActivationRejection` codes |
+| Activation | Required and blocked gameplay tags, minimum/maximum range and facing angle, a `Cost Gameplay Effect` checked with `CheckCost` and optionally paid again every `Cost Period`, a `Cooldown Gameplay Effect` whose granted tags mean "on cooldown", a commit step (`AbilityCommitPolicy`, `TryCommitAbility`), effects that live exactly as long as the activation, Set By Caller numbers filled in `ConfigureOutgoingSpec`, charges with restore time, a motor check for abilities that move their owner, a game-owned `CanActivateAbility`, and typed `AbilityActivationRejection` codes |
 | Concurrency | Group tags with four mutual-exclusion policies: one ability at a time, per-group blocking, cancel the group, or cancel everything |
 | Cancellation | Tag-named cancel requests, a per-ability policy (anything / only listed tags / nothing), four cancellation scopes, and the package tags `Cancel.Manual`, `.TargetLost`, `.PhysicsForce`, `.StepTimeout`, `.Superseded`, `.Failed` and `.OwnerTeardown` |
 | Effects | One `GameplayEffectDefinition` asset with instant, duration and infinite policies, periods, one `GameplayEffectSpec` per application, `ActiveGameplayEffect` behind a `GameplayEffectHandle`, stacking with scope and overflow rules, immunity, granted and removal tags, and an `EffectBlocked` seam |
 | Magnitudes | Source or target capture, snapshotted at application or re-read while active, level scaling, and `CaptureOwnMagnitudes` for subclass-authored values |
-| Attributes | Identifiers, `AttributeSetDefinition`, base values and limits, deterministic Add/Multiply/Override aggregation, modifier slots with stable ids, typed change events, regeneration |
+| Attributes | Identifiers, `AttributeSetDefinition`, base values and limits, deterministic Add/Multiply/Override aggregation, modifier slots with stable ids, typed change events, a ceiling read from another attribute; regeneration is a periodic effect the loadout grants |
 | Damage and force | One `DamageEffectDefinition` with sphere, box, capsule, cone and ray `HitShape`s, subtracting from an authored target attribute and asking the target to react with `Event.HitReaction` / `Event.Knockdown`; `HitReactionAbilityDefinition`, the target-owned reaction that plays the clip, holds the lock and runs the authored knockback in its own scope; `PhysicsForceEffectDefinition` with level scaling, `Event.PhysicsForce` and `AbilityPhysicsBody`; parry effects authored on the ability |
 | Targeting | `AbilityTargetData` shared per trigger frame and deterministically ordered; actors resolved from colliders to the nearest ability system, attribute set or effect container; filters for owner exclusion, scenery, the dead, required and blocked tags, line of sight and maximum count; `TargetAssistDefinition` with proximity, cone, facing, startup approach and lock policy |
 | Ability tasks | A cancellable per-activation scope; waits for delay, gameplay event, input press/release and animation event; `AcquireTargets`; `MoveByDistance`, `MoveTowardTarget` and `ApplyKnockback` with explicit direction policies, priority and conflict resolution |
@@ -85,7 +85,7 @@ deprecation policy.
 | Input | Input System routing in its own assembly, driven by an `AbilityInputMap` asset, with press, hold and release activation policies |
 | Editor | One `Gameplay Ability System` Inspector gathering the actor's loadout, attributes, input map, physics and diagnostics, with a live readout in play mode; ability Inspector with draggable timeline lanes per step, derived-type fields grouped one section per declaring class (phases, combo window and grace, movement, displacement, tag windows, effect triggers, cues) and live validation, embedded-effect editing with its own validation box, an effect Inspector for every effect type, asset-naming enforcement with a one-click rename, edit-time query gizmos that share the runtime geometry and filters, an Add button on every missing section of the actor panel (offering the project's concrete attribute sets, never the base), and the Ability Debugger window: live readout of a selected actor, an activation audit that runs the runtime's own `EvaluateActivation`, the counters, and editor-owned slow-motion and hit-stop controls |
 | Diagnostics | Per-actor timestamped `AbilityEventHistory` carrying the rejection code of every refused activation and the cancel tag of every ending, `AbilityDiagnostics` with its master switch and allocation and timing counters for target queries, effect application and tasks, `GAS.*` profiler markers, `AbilitySystemDebugger` Console readout, `AbilityDebugDraw`, `DebugDrawEffectDefinition` |
-| Persistence | `AbilityPersistence.Capture` and `.Restore` over a versioned `AbilitySaveRecord` of cooldowns, charges, attribute base values, active effects and loose tags; `IAbilitySaveResolver` to turn ids back into assets, `AbilityOfflinePolicy` for the time between sessions, `IAbilitySaveMigration` for an older schema, and a report naming everything that could not be honoured |
+| Persistence | `AbilityPersistence.Capture` and `.Restore` over a versioned `AbilitySaveRecord` of charges, attribute base values, active effects — cooldowns included — with their Set By Caller numbers, and loose tags; `IAbilitySaveResolver` to turn ids back into assets, `AbilityOfflinePolicy` for the time between sessions, `IAbilitySaveMigration` for an older schema, and a report naming everything that could not be honoured |
 | Samples | One importable sample, Melee Combat: combo, roll, block with a parry window, target assist, damage, poise, knockback, cues, player input and a minimal AI, plus a profiling scene with the counters on screen |
 | Consumer hooks | `IAbilityReplicationSink`, `GameplayEffectContainer.EffectBlocked` (where a parry reward hangs), `AbilityDiagnostics.EventRecorded`, `CommonGameplayTags` including `State.Invulnerable` |
 
@@ -100,7 +100,7 @@ unbuilt work is tracked.
 | Per-member API documentation, an editor namespace, the `1.0` freeze | Milestone 1 |
 | `SpawnProjectileAndWait` and projectile effects | Blocked on a consumer |
 | Team and faction target filters | Blocked on a consumer |
-| Cooldown-reducing effects and cost discounts | Blocked on a consumer |
+| Costs for resources that are not attributes | Blocked on a consumer |
 | Effect execution calculations as assets | Blocked on a consumer |
 | Generated attribute accessors | Blocked on a consumer |
 
@@ -430,8 +430,9 @@ expresses.
 Derive from `AbilityDefinition` for a new *kind* of ability, when behaviour
 cannot be expressed as data. A subclass may add serialized fields — the Inspector
 draws whatever its hand-written layout does not, **one section per class that
-declares fields, base first**, so an ability three levels deep reads as what
-every ability has, then what its parent adds, then what it adds — override
+declares fields, right under the Ability Id and before everything every ability
+shares**, parent before child, so an ability reads as what makes it this kind of
+ability first and the common parameters after — override
 `TryValidate` to check them, and override the lifecycle hooks:
 
 ```csharp
@@ -442,7 +443,30 @@ protected internal virtual void OnCancelled(AbilityInstance instance, GameplayTa
 ```
 
 They run before the matching public event, so the ability's own logic settles
-before anything outside observes it. The definition is a shared asset, so
+before anything outside observes it.
+
+A rule of the game's own about *whether* the ability may start — "the
+inventory has room", "there is something to pull" — overrides
+`CanActivateAbility`, the override point Unreal's GAS gives the same question:
+
+```csharp
+protected internal virtual bool CanActivateAbility(
+    AbilitySystem system, in AbilityContext context, out string reason);
+```
+
+It is asked last, after every package check, by `EvaluateActivation`,
+`CanActivate` and every attempt alike, and a refusal is reported as
+`AbilityActivationRejection.ConditionNotMet` with the reason as its message. It
+is a question: side-effect free, and the same answer when asked twice.
+
+Numbers the ability decides for its own effects — a sprint's speed, the stamina
+each installment of its cost takes — go on the spec as Set By Caller magnitudes
+in `ConfigureOutgoingSpec`, which runs on every spec the ability makes for its
+cost, its cooldown and its Active Effects:
+
+```csharp
+protected internal virtual void ConfigureOutgoingSpec(GameplayEffectSpec spec);
+``` The definition is a shared asset, so
 per-activation state belongs on the `AbilityInstance` or on the owner, never in
 a field of the subclass.
 
@@ -782,10 +806,38 @@ launch share this path; slow remains an attribute effect.
 
 ## Costs, charges, buffering, and whiffs
 
-Abilities declare `AbilityCost` entries (attribute + amount), checked before
-activation and deducted on success — Stamina for a sprint attack, for example.
+Paying for an ability works the way Unreal's GAS does it: with effects.
+
+- **Cost.** `Cost Gameplay Effect` is an Instant effect applied to the owner.
+  `CheckCost` asks, without applying anything, whether one of its additive
+  modifiers would take an attribute below its minimum; activation is refused
+  with `InsufficientAttribute` when it would. An owner immune to the cost effect
+  pays nothing, which is how a "free casting" buff works.
+- **Paying again while active.** `Cost Period` pays the cost again every so many
+  seconds while the activation runs — a sprint on stamina, a channel on mana.
+  The first installment is what activation checks; the first one that cannot be
+  paid ends the activation with `Cancel.InsufficientCost`, whatever its cancel
+  policy.
+- **Cooldown.** `Cooldown Gameplay Effect` is a Duration effect whose granted
+  tags mean "on cooldown". `IsOnCooldown` looks for those tags, whatever applied
+  them, and `GetCooldownTimeRemainingAndDuration` reads the effect. The Cooldown
+  Start Policy applies it on commit or when a committed activation completes.
+- **Commit.** Paying the cost, spending a charge and applying an On Commit
+  cooldown is one step. `AbilityCommitPolicy.OnActivation` commits as the
+  ability starts; `Manual` waits for the ability to call `TryCommitAbility` —
+  after a wind-up, say — which checks everything again and ends the activation
+  with `Cancel.CommitFailed` when it can no longer pay.
+- **Numbers the ability decides.** A magnitude can read its flat part from the
+  spec under a tag — Set By Caller. The ability fills those numbers in
+  `ConfigureOutgoingSpec`, which runs on every spec it makes for its cost, its
+  cooldown and its Active Effects, so a sprint's speed and stamina per second
+  live on the sprint while its effects stay generic.
+- **Active Effects** are applied to the owner on activation and removed when it
+  ends, completed or cancelled, so a speed buff never outlives the ability that
+  granted it.
+
 `MaxCharges` limits consecutive uses; charges refill one per
-`ChargeRestoreTime`, or all at once when the cooldown elapses when the restore
+`ChargeRestoreTime`, or all at once when the cooldown ends when the restore
 time is zero. Validation requires limited charges to have a restore path.
 
 `AbilityInputRouter` buffers rejected inputs for `bufferWindow` seconds and
@@ -1222,7 +1274,7 @@ per-actor state, and effect execution.
 | `GameplayAttribute` | Serializable stable identifier such as `Combat.Health` |
 | `AttributeValue` | Per-actor base value, computed current value, limits, and attached modifier slots |
 | `AttributeSet` | Game-defined component that owns related runtime attributes |
-| `AttributeSetDefinition` | Shared savable initial values and regeneration |
+| `AttributeSetDefinition` | Shared savable initial values and limits |
 | `AttributeModifier` | Attribute, operation and magnitude, attached under a slot id |
 | `GameplayEffectDefinition` | Immutable effect asset: targeting, duration policy, modifiers, stacking, tags |
 | `GameplayEffectMagnitude` | How one number is calculated, including its capture rules |
@@ -1255,7 +1307,16 @@ public sealed class CombatAttributeSet : AttributeSet
 - Attribute changes emit a typed `AttributeValueChanged` with old value, new
   value, source and attribute.
 - Runtime values never live in `ScriptableObject` assets.
-- Regeneration is authored on the set, because it belongs to no application.
+- Regeneration is an effect, not a feature of the set: an infinite periodic
+  effect, usually in the loadout's `Granted Effects`, that its Ongoing Tag
+  Requirements switch off — stamina that does not refill mid-sprint.
+- An initial value can name a `Max Attribute` whose current value is its
+  ceiling instead of a fixed `Max Value`: Stamina under Max Stamina, so an
+  upgrade that raises the ceiling raises what can be refilled. `GetCurrent`
+  applies the ceiling; `Add` and `Multiply` never leave the base above it,
+  while `Override` writes the base as given, which is how a save restores a
+  value whose ceiling comes back with the effects restored after it. A ceiling
+  cannot be capped itself.
 
 The set aggregates; it does not decide lifetimes. Durations, periods, stacking,
 overflow, immunity and tags belong to `GameplayEffectContainer`, which is added
@@ -1299,14 +1360,20 @@ carries over.
 - A refused application raises `GameplayEffectContainer.EffectBlocked` with the
   spec that was stopped, which is the seam a parry or an armor rule hangs on.
 
-### Costs and cooldowns stay explicit
+### Ongoing Tag Requirements
 
-Costs are `AbilityCost` on the ability and cooldowns are a dictionary over
-`Time.time`. Both were considered for the generic lifecycle and both stayed:
-expressing them as effects would cost an asset per ability to say what one
-authored field already says, and the capability it would add — a
-cooldown-reducing effect — has no consumer yet. `CHANGELOG.md` carries the full
-reasoning.
+An effect's `Ongoing Required Tags` and `Ongoing Blocked Tags` decide, after it
+is applied, whether it is on. Off, it stays applied — its duration runs and its
+granted tags stay — but it contributes no modifiers and runs no periods; on
+again, it picks up where it paused. The requirements are checked on
+application and on every tick of the container.
+
+### Granted Effects
+
+An `AbilityLoadout` can grant effects as well as abilities, the way Lyra's
+AbilitySet does: its `Granted Effects` are applied when the ability system
+starts, and again after a save restore that did not bring them back, never
+twice. Regeneration and passive buffs live here.
 
 ## Debugging and replication hooks
 
@@ -1393,9 +1460,11 @@ AbilityPersistence.Restore(
     out AbilitySaveReport restored);
 ```
 
-**What travels:** cooldowns, charges and their restore timers, attribute base
-values, active duration and infinite effects with their stacks and remaining
-time, and loose tags.
+**What travels:** charges and their restore timers, attribute base values,
+active duration and infinite effects with their stacks, remaining time and Set
+By Caller numbers — cooldowns among them, since a cooldown is an effect — and
+loose tags. The loadout's Granted Effects need no id: a restore grants them
+again.
 
 **What does not:** running activations, tasks, animator state, and the source
 actor of an effect. A record is taken between activations - capturing an actor

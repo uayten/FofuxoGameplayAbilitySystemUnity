@@ -4,7 +4,7 @@ namespace Fofuxo.GameplayAbilitySystem
 {
     /// <summary>
     /// Savable attribute defaults shared by every actor using the same build:
-    /// initial values and regeneration, mirroring an Unreal AttributeSet CDO.
+    /// initial values and limits, mirroring an Unreal AttributeSet CDO.
     /// Assign on <see cref="AttributeSet"/> to stop authoring numbers per instance.
     /// </summary>
     [CreateAssetMenu(
@@ -13,9 +13,7 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class AttributeSetDefinition : ScriptableObject
     {
         [SerializeField] private AttributeSet.InitialValue[] initialValues = { };
-        [SerializeField] private AttributeSet.Regeneration[] regeneration = { };
 
         public AttributeSet.InitialValue[] InitialValues => initialValues;
-        public AttributeSet.Regeneration[] Regeneration => regeneration;
     }
 }

@@ -18,7 +18,8 @@ MonoBehaviour:
   maximumRange: 3
   maximumFacingAngle: 180
   targetAssist: {fileID: 0}
-  cooldown: 0
+  commitPolicy: 0
+  cooldownGameplayEffect: {fileID: 0}
   cooldownStartPolicy: 0
   cancelPolicy: 0
   cancelledByTags: []
@@ -34,7 +35,8 @@ MonoBehaviour:
       value: Event.Knockdown
     interruptActiveAbility: 1
     restartWhenActive: 1
-  costs: []
+  costGameplayEffect: {fileID: 0}
+  costPeriod: 0
   maxCharges: 0
   chargeRestoreTime: 0
   requiredTags: []

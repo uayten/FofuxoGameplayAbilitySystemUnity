@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Assemblies;
 
 namespace Fofuxo.GameplayAbilitySystem.Tests
 {
@@ -38,7 +39,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void TheMotorsAssembly_ReferencesNoGameAssembly()
         {
-            Assembly motors = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(
+            Assembly motors = CurrentAssemblies.GetLoadedAssemblies().FirstOrDefault(
                 candidate => candidate.GetName().Name ==
                     "Uayten.FofuxoGameplayAbilitySystem.Motors");
             Assert.IsNotNull(motors, "the Motors assembly is compiled");

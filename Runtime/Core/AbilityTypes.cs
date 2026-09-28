@@ -11,13 +11,29 @@ namespace Fofuxo.GameplayAbilitySystem
         Recovery
     }
     /// <summary>
-    /// Whether an ability's cooldown starts the moment it activates or only
+    /// Whether an ability's cooldown effect is applied when it commits or only
     /// when it finishes.
     /// </summary>
     public enum AbilityCooldownStartPolicy
     {
-        OnActivation,
+        /// <summary>Applied with the cost, when the ability commits.</summary>
+        OnCommit,
+        /// <summary>Applied when a committed activation completes; a cancel starts none.</summary>
         OnCompletion
+    }
+
+    /// <summary>
+    /// When an ability commits — pays its cost and starts a commit-time
+    /// cooldown. Unreal's GAS leaves it to the ability's graph to call
+    /// CommitAbility; a data-driven ability here commits on activation unless
+    /// it asks to do it itself.
+    /// </summary>
+    public enum AbilityCommitPolicy
+    {
+        /// <summary>Commits as the activation starts, before OnActivated runs.</summary>
+        OnActivation,
+        /// <summary>Commits when the ability calls <c>AbilitySystem.TryCommitAbility</c>.</summary>
+        Manual
     }
 
     /// <summary>
@@ -41,7 +57,10 @@ namespace Fofuxo.GameplayAbilitySystem
         OnCooldown,
         /// <summary>Every charge is spent and none has been restored yet.</summary>
         NoChargesLeft,
-        /// <summary>An attribute cost cannot be paid.</summary>
+        /// <summary>
+        /// The cost effect cannot be paid: one of its additive modifiers would
+        /// take an attribute below its minimum.
+        /// </summary>
         InsufficientAttribute,
         /// <summary>A tag the ability requires is not present on the owner.</summary>
         MissingRequiredTag,
@@ -68,7 +87,13 @@ namespace Fofuxo.GameplayAbilitySystem
         /// assist that approaches — and the owner has no <c>IAbilityMotor</c>
         /// and no Rigidbody, so the travel would reach nothing.
         /// </summary>
-        MissingMotor
+        MissingMotor,
+        /// <summary>
+        /// Every package check passed and the ability's own
+        /// <c>CanActivateAbility</c> said no — a rule of the game, such
+        /// as "there is something to pick up". Checked last.
+        /// </summary>
+        ConditionNotMet
     }
 
     /// <summary>

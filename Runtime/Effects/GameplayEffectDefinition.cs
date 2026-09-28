@@ -75,6 +75,10 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private GameplayTag[] grantedImmunityTags = { };
         [Tooltip("On application, removes the target's active effects carrying any of these effect tags.")]
         [SerializeField] private GameplayTag[] removeEffectsWithTags = { };
+        [Tooltip("Ongoing Tag Requirements: once applied, the effect is on only while the target holds all of these. Off, it contributes no modifiers and runs no periods, but stays applied.")]
+        [SerializeField] private GameplayTag[] ongoingRequiredTags = { };
+        [Tooltip("Ongoing Tag Requirements: once applied, the effect is off while the target holds any of these — a regeneration that stops while sprinting.")]
+        [SerializeField] private GameplayTag[] ongoingBlockedTags = { };
 
         [Header("Cue")]
         [Tooltip("Cosmetic cue raised on the target when this effect lands: executed once for an instant effect, added for a duration or infinite one and removed with it. Empty raises nothing.")]
@@ -107,6 +111,15 @@ namespace Fofuxo.GameplayAbilitySystem
         public IReadOnlyList<GameplayTag> ApplicationBlockedTags => applicationBlockedTags;
         public IReadOnlyList<GameplayTag> GrantedImmunityTags => grantedImmunityTags;
         public IReadOnlyList<GameplayTag> RemoveEffectsWithTags => removeEffectsWithTags;
+        /// <summary>Tags the target must all hold for the applied effect to be on.</summary>
+        public IReadOnlyList<GameplayTag> OngoingRequiredTags =>
+            ongoingRequiredTags ?? Array.Empty<GameplayTag>();
+        /// <summary>Tags that switch the applied effect off while the target holds any.</summary>
+        public IReadOnlyList<GameplayTag> OngoingBlockedTags =>
+            ongoingBlockedTags ?? Array.Empty<GameplayTag>();
+        /// <summary>True when the effect can be switched off by the target's tags.</summary>
+        public bool HasOngoingTagRequirements =>
+            OngoingRequiredTags.Count > 0 || OngoingBlockedTags.Count > 0;
 
         /// <summary>
         /// Whether this effect carries any of those effect tags. Removal and
@@ -190,7 +203,9 @@ namespace Fofuxo.GameplayAbilitySystem
                 !TryValidateTagList(applicationRequiredTags, "Application required", out error) ||
                 !TryValidateTagList(applicationBlockedTags, "Application blocked", out error) ||
                 !TryValidateTagList(grantedImmunityTags, "Granted immunity", out error) ||
-                !TryValidateTagList(removeEffectsWithTags, "Remove effects with", out error))
+                !TryValidateTagList(removeEffectsWithTags, "Remove effects with", out error) ||
+                !TryValidateTagList(ongoingRequiredTags, "Ongoing required", out error) ||
+                !TryValidateTagList(ongoingBlockedTags, "Ongoing blocked", out error))
             {
                 return false;
             }
@@ -633,6 +648,14 @@ namespace Fofuxo.GameplayAbilitySystem
             applicationBlockedTags = blocked ?? Array.Empty<GameplayTag>();
             grantedImmunityTags = immunity ?? Array.Empty<GameplayTag>();
             removeEffectsWithTags = removal ?? Array.Empty<GameplayTag>();
+        }
+
+        internal void SetOngoingTagsForTests(
+            GameplayTag[] required = null,
+            GameplayTag[] blocked = null)
+        {
+            ongoingRequiredTags = required ?? Array.Empty<GameplayTag>();
+            ongoingBlockedTags = blocked ?? Array.Empty<GameplayTag>();
         }
 
         internal void SetDurationMagnitudeForTests(GameplayEffectMagnitude magnitude)

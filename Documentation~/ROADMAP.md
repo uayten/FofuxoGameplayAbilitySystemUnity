@@ -225,16 +225,11 @@ invented against nothing. Build it when the trigger fires, not before.
   two and expresses them with layers.
 - **`SpawnProjectileAndWait`.** *Trigger:* a consumer that actually fires
   projectiles.
-- **Cooldowns as gameplay effects.** Cooldowns stay a
-  `Dictionary<AbilityDefinition, float>` over `Time.time`, which needs no tick to
-  stay correct. Expressing them as effects costs either an asset per ability or a
-  cooldown tag re-authored onto every ability. *Trigger:* a cooldown-reducing
-  effect with a real use case.
-- **Costs as gameplay effects.** Costs stay `AbilityCost` on the ability, paid by
-  `PayCosts` through the same instant modifier call an effect makes; the
-  activation check must stay side-effect free and is already typed
-  (`InsufficientAttribute`). *Trigger:* a cost discount or a cost that varies by
-  more than a level.
+- **Costs for resources that are not attributes.** Ammunition, inventory items
+  or anything else the consumer owns, checked and paid through a cost type the
+  consumer implements, the way Lyra's `AdditionalCosts` extend Unreal's
+  `CheckCost` and `ApplyCost`. *Trigger:* a consumer ability that spends such a
+  resource.
 - **Effect execution calculations as assets.** *Trigger:* a damage formula that
   a `GameplayEffectMagnitude` cannot express.
 - **Generated attribute accessors.** `AttributeSet` is reached by

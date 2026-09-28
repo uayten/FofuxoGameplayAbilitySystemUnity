@@ -354,7 +354,8 @@ MonoBehaviour:
   maximumRange: 3
   maximumFacingAngle: 180
   targetAssist: {fileID: 11400000, guid: 2aa1690127898b741a169fffb60475ff, type: 2}
-  cooldown: 0
+  commitPolicy: 0
+  cooldownGameplayEffect: {fileID: 0}
   cooldownStartPolicy: 0
   cancelPolicy: 0
   cancelledByTags: []
@@ -365,7 +366,8 @@ MonoBehaviour:
     value: 
   groupExclusionPolicy: 0
   activationTriggers: []
-  costs: []
+  costGameplayEffect: {fileID: 0}
+  costPeriod: 0
   maxCharges: 0
   chargeRestoreTime: 0
   requiredTags: []

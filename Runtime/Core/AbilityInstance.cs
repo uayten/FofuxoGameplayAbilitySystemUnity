@@ -23,6 +23,35 @@ namespace Fofuxo.GameplayAbilitySystem
         private bool[] openTagWindows;
         private readonly AbilityTaskScope tasks = new();
         private AbilityMoveTask displacementTask;
+        /// <summary>
+        /// Handles of the ability's Active Effects on the owner, created only
+        /// when the ability has any.
+        /// </summary>
+        private List<GameplayEffectHandle> activeEffectHandles;
+
+        /// <summary>
+        /// True once the activation has paid its cost and, under the On Commit
+        /// policy, started its cooldown. An ability with the Manual commit
+        /// policy runs uncommitted until it calls
+        /// <c>AbilitySystem.TryCommitAbility</c>.
+        /// </summary>
+        public bool IsCommitted { get; internal set; }
+
+        /// <summary>Seconds until the next installment of a periodic cost.</summary>
+        internal float CostPeriodRemaining { get; set; }
+
+        internal void AddActiveEffectHandle(GameplayEffectHandle handle)
+        {
+            (activeEffectHandles ??= new List<GameplayEffectHandle>()).Add(handle);
+        }
+
+        /// <summary>Hands the Active Effect handles over for removal, once.</summary>
+        internal List<GameplayEffectHandle> TakeActiveEffectHandles()
+        {
+            List<GameplayEffectHandle> handles = activeEffectHandles;
+            activeEffectHandles = null;
+            return handles;
+        }
 
         public AbilityInstance(AbilityDefinition definition, AbilityContext context)
             : this(definition, context, null, null)

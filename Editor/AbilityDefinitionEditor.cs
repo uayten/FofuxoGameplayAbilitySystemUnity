@@ -20,7 +20,7 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
     {
         /// <summary>
         /// Every property this Inspector lays out by hand. What is left over is
-        /// drawn by <see cref="DrawUnhandledProperties"/>, so a derived ability's
+        /// drawn by <see cref="DrawDeclaredSections"/>, so a derived ability's
         /// own fields are editable without touching this file, and a field added to
         /// the base class can never go silently invisible.
         /// </summary>
@@ -87,6 +87,10 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
                 timelineView.Draw(serializedObject, timelineAbility);
             }
 
+            // What makes this kind of ability what it is comes before what every
+            // ability shares.
+            DrawDeclaredSections(derivedTypes: true);
+
             EditorGUILayout.Space();
             DrawProperty("requiresTarget");
             DrawProperty("minimumRange");
@@ -95,7 +99,8 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
             DrawProperty("targetAssist", "Target Assist");
 
             EditorGUILayout.Space();
-            DrawProperty("cooldown");
+            DrawProperty("commitPolicy", "Commit Policy");
+            DrawProperty("cooldownGameplayEffect", "Cooldown Gameplay Effect");
             DrawProperty("cooldownStartPolicy");
             DrawCancellation(ability);
             DrawProperty("lockMovementDuringAbility");
@@ -106,7 +111,8 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
             DrawExclusionGroup(ability);
 
             EditorGUILayout.Space();
-            DrawProperty("costs", null, true);
+            DrawProperty("costGameplayEffect", "Cost Gameplay Effect");
+            DrawProperty("costPeriod", "Cost Period");
             DrawProperty("maxCharges");
             DrawProperty("chargeRestoreTime");
 
@@ -114,10 +120,11 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
             DrawProperty("requiredTags", null, true);
             DrawProperty("blockedTags", null, true);
             DrawProperty("grantedTags", null, true);
+            DrawProperty("activeEffects", "Active Effects", true);
             DrawProperty("onParryEffects", null, true);
             DrawProperty("baseAiWeight");
 
-            DrawUnhandledProperties();
+            DrawDeclaredSections(derivedTypes: false);
             serializedObject.ApplyModifiedProperties();
 
             EditorGUILayout.Space();
@@ -268,14 +275,18 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
         }
 
         /// <summary>
-        /// Draws whatever the hand-written layout above did not: the fields of a
-        /// derived ability type, and any base field that was added without a line
-        /// here. One section per class that declares fields, base first, so an
-        /// ability three levels deep reads as what it inherits, then what its parent
-        /// adds, then what it adds — instead of one undifferentiated pile under the
+        /// Draws whatever the hand-written layout does not, one section per class
+        /// that declares fields, instead of one undifferentiated pile under the
         /// name of the concrete type, which is what a single heading gave.
+        ///
+        /// Called twice. With <paramref name="derivedTypes"/> it draws the fields
+        /// of the derived types, right under the identity and before everything
+        /// every ability shares, parent before child, because they are what this
+        /// ability is about. Without it, it draws any base field that was added
+        /// without a line in the layout, at the bottom, so it can never go
+        /// silently invisible.
         /// </summary>
-        private void DrawUnhandledProperties()
+        private void DrawDeclaredSections(bool derivedTypes)
         {
             // The preview pane at the bottom owns this one and draws it later.
             MarkHandled("previewAnimationClip");
@@ -305,7 +316,8 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
 
             foreach (System.Type type in InheritanceChain(target.GetType()))
             {
-                if (!byDeclaringType.TryGetValue(type, out List<SerializedProperty> group))
+                if ((type != typeof(AbilityDefinition)) != derivedTypes ||
+                    !byDeclaringType.TryGetValue(type, out List<SerializedProperty> group))
                 {
                     continue;
                 }
@@ -353,8 +365,8 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
 
         /// <summary>
         /// The ability's hierarchy from <see cref="AbilityDefinition"/> down to the
-        /// concrete type. Base first, because that is the order an author reads it
-        /// in: what every ability has, then what this kind of ability adds.
+        /// concrete type, parent before child, so a derived section reads as what
+        /// the parent kind adds and then what this kind adds.
         /// </summary>
         private static List<System.Type> InheritanceChain(System.Type concreteType)
         {

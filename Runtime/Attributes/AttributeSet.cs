@@ -42,8 +42,9 @@ namespace Fofuxo.GameplayAbilitySystem
     /// folds into the base value, and a modifier attached here stays attached
     /// until its slot is removed. How long that is — duration, period, stacking,
     /// overflow, immunity — belongs to <see cref="GameplayEffectContainer"/>,
-    /// which is the one owner of an effect lifecycle. Regeneration stays here,
-    /// because it is authored on the set itself and belongs to no application.
+    /// which is the one owner of an effect lifecycle. Regeneration is one of
+    /// those lifetimes: an infinite periodic effect, usually granted by the
+    /// actor's loadout, switched off by its Ongoing Tag Requirements.
     /// </summary>
     [DisallowMultipleComponent]
     public class AttributeSet : MonoBehaviour
@@ -58,17 +59,21 @@ namespace Fofuxo.GameplayAbilitySystem
             [SerializeField] private float baseValue;
             [SerializeField] private float minValue;
             [SerializeField] private float maxValue;
+            [Tooltip("Another attribute whose current value is this one's ceiling, like Max Stamina for Stamina. When set, Max Value is ignored.")]
+            [SerializeField] private GameplayAttribute maxAttribute;
 
             public InitialValue(
                 GameplayAttribute attribute,
                 float baseValue,
                 float minValue,
-                float maxValue)
+                float maxValue,
+                GameplayAttribute maxAttribute = default)
             {
                 this.attribute = attribute;
                 this.baseValue = baseValue;
                 this.minValue = minValue;
                 this.maxValue = maxValue;
+                this.maxAttribute = maxAttribute;
             }
             /// <summary>Which attribute this row sets up.</summary>
             public GameplayAttribute Attribute => attribute;
@@ -76,37 +81,27 @@ namespace Fofuxo.GameplayAbilitySystem
             public float BaseValue => baseValue;
             /// <summary>Lowest value the attribute is clamped to.</summary>
             public float MinValue => minValue;
-            /// <summary>Highest value the attribute is clamped to.</summary>
+            /// <summary>
+            /// Highest value the attribute is clamped to, unless
+            /// <see cref="MaxAttribute"/> is set.
+            /// </summary>
             public float MaxValue => maxValue;
-        }
-        /// <summary>
-        /// An attribute that refills by itself, in units per second.
-        /// </summary>
-        [Serializable]
-        public struct Regeneration
-        {
-            [SerializeField] private GameplayAttribute attribute;
-            [SerializeField] private float perSecond;
-
-            public Regeneration(GameplayAttribute attribute, float perSecond)
-            {
-                this.attribute = attribute;
-                this.perSecond = perSecond;
-            }
-            /// <summary>Which attribute refills by itself.</summary>
-            public GameplayAttribute Attribute => attribute;
-            /// <summary>Units added per second.</summary>
-            public float PerSecond => perSecond;
+            /// <summary>
+            /// The attribute whose current value caps this one. Empty means the
+            /// fixed <see cref="MaxValue"/> applies.
+            /// </summary>
+            public GameplayAttribute MaxAttribute => maxAttribute;
         }
 
         [Tooltip("Shared savable defaults. When assigned, Rebuild uses it instead of the local arrays.")]
         [SerializeField] private AttributeSetDefinition definition;
         [SerializeField] private InitialValue[] initialValues = { };
-        [SerializeField] private Regeneration[] regeneration = { };
 
         private readonly Dictionary<GameplayAttribute, AttributeValue> values = new();
         /// <summary>Attribute each issued slot belongs to, so removal finds it in one lookup.</summary>
         private readonly Dictionary<int, GameplayAttribute> slotOwners = new();
+        /// <summary>Capped attribute, keyed to the attribute whose current value is its ceiling.</summary>
+        private readonly Dictionary<GameplayAttribute, GameplayAttribute> caps = new();
         private int nextSlot;
         private bool initialized;
         /// <summary>
@@ -118,11 +113,6 @@ namespace Fofuxo.GameplayAbilitySystem
         protected virtual void Awake()
         {
             EnsureInitialized();
-        }
-
-        private void Update()
-        {
-            Tick(Time.deltaTime);
         }
 
         /// <summary>
@@ -143,6 +133,7 @@ namespace Fofuxo.GameplayAbilitySystem
             initialized = true;
             values.Clear();
             slotOwners.Clear();
+            caps.Clear();
             InitialValue[] initials = definition != null ? definition.InitialValues : initialValues;
             foreach (InitialValue initial in initials)
             {
@@ -151,19 +142,44 @@ namespace Fofuxo.GameplayAbilitySystem
                     continue;
                 }
 
+                bool capped = !initial.MaxAttribute.IsEmpty && initial.MaxAttribute != initial.Attribute;
+                if (capped)
+                {
+                    caps.Add(initial.Attribute, initial.MaxAttribute);
+                }
+
                 values.Add(
                     initial.Attribute,
                     new AttributeValue(
                         initial.BaseValue,
                         initial.MinValue,
-                        Mathf.Max(initial.MinValue, initial.MaxValue)));
+                        capped
+                            ? float.PositiveInfinity
+                            : Mathf.Max(initial.MinValue, initial.MaxValue)));
             }
+
+            DropChainedCaps();
         }
-        /// <summary>The aggregate value: the base plus every live modifier.</summary>
+
+        /// <summary>
+        /// The aggregate value: the base plus every live modifier, held under
+        /// the Max Attribute's current value when the attribute has one.
+        /// </summary>
         public float GetCurrent(GameplayAttribute attribute)
         {
-            return GetOrCreate(attribute).CurrentValue;
+            return CurrentOf(attribute, GetOrCreate(attribute));
         }
+
+        /// <summary>
+        /// The lowest value the attribute is clamped to — what a cost check
+        /// compares against, the way Unreal's refuses a cost that would take an
+        /// attribute below zero.
+        /// </summary>
+        public float GetMinimum(GameplayAttribute attribute)
+        {
+            return GetOrCreate(attribute).MinValue;
+        }
+
         /// <summary>The base value alone, with no modifier applied.</summary>
         public float GetBase(GameplayAttribute attribute)
         {
@@ -173,6 +189,8 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>
         /// Every attribute this set holds a value for, with its live aggregate.
         /// A read-only view for tooling; writes go through the modifier calls.
+        /// The ceiling of a Max Attribute is not applied here: read the capped
+        /// value through <see cref="GetCurrent"/>.
         /// </summary>
         public IReadOnlyDictionary<GameplayAttribute, AttributeValue> Values
         {
@@ -186,6 +204,11 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>
         /// Folds a change into the base value, permanently. This is what an
         /// instant effect and every period of a periodic one do.
+        ///
+        /// Under a Max Attribute, Add and Multiply never leave the base above
+        /// the ceiling, so a refill stops at it and a drain starts from it.
+        /// Override is written as given: it is how a save restores a base
+        /// whose ceiling only comes back with the effects restored after it.
         /// </summary>
         public void ApplyInstantModifier(AttributeModifier modifier)
         {
@@ -195,7 +218,16 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             AttributeValue value = GetOrCreate(modifier.Attribute);
-            float oldValue = value.CurrentValue;
+            float oldValue = CurrentOf(modifier.Attribute, value);
+            float ceiling = CeilingOf(modifier.Attribute);
+            bool settlesToCeiling =
+                modifier.Operation != AttributeOperation.Override &&
+                !float.IsPositiveInfinity(ceiling);
+            if (settlesToCeiling && value.BaseValue > ceiling)
+            {
+                value.SetBase(ceiling);
+            }
+
             switch (modifier.Operation)
             {
                 case AttributeOperation.Add:
@@ -209,12 +241,12 @@ namespace Fofuxo.GameplayAbilitySystem
                     break;
             }
 
-            float newValue = value.CurrentValue;
-            if (!Mathf.Approximately(oldValue, newValue))
+            if (settlesToCeiling && value.BaseValue > ceiling)
             {
-                Changed?.Invoke(new AttributeValueChanged(
-                    modifier.Attribute, oldValue, newValue, modifier.Source));
+                value.SetBase(ceiling);
             }
+
+            EmitIfChanged(modifier.Attribute, modifier.Source, oldValue);
         }
         /// <summary>
         /// Replaces the authored starting values and rebuilds the set, which
@@ -241,7 +273,7 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             AttributeValue value = GetOrCreate(modifier.Attribute);
-            float oldValue = value.CurrentValue;
+            float oldValue = CurrentOf(modifier.Attribute, value);
             nextSlot++;
             value.AddModifier(nextSlot, modifier);
             slotOwners[nextSlot] = modifier.Attribute;
@@ -262,7 +294,7 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             AttributeValue value = GetOrCreate(attribute);
-            float oldValue = value.CurrentValue;
+            float oldValue = CurrentOf(attribute, value);
             if (!value.UpdateModifier(slot, modifier))
             {
                 return false;
@@ -282,7 +314,7 @@ namespace Fofuxo.GameplayAbilitySystem
 
             slotOwners.Remove(slot);
             AttributeValue value = GetOrCreate(attribute);
-            float oldValue = value.CurrentValue;
+            float oldValue = CurrentOf(attribute, value);
             if (!value.RemoveModifier(slot))
             {
                 return false;
@@ -292,31 +324,6 @@ namespace Fofuxo.GameplayAbilitySystem
             return true;
         }
 
-        /// <summary>
-        /// Advances regeneration. Called automatically; public so tests can step
-        /// time deterministically. Effect durations and periods are aged by
-        /// <see cref="GameplayEffectContainer.Tick"/>, not here.
-        /// </summary>
-        public void Tick(float deltaTime)
-        {
-            float step = Mathf.Max(0f, deltaTime);
-            if (step <= 0f)
-            {
-                return;
-            }
-
-            Regeneration[] regen = definition != null ? definition.Regeneration : regeneration;
-            foreach (Regeneration entry in regen)
-            {
-                if (entry.Attribute.IsEmpty || Mathf.Approximately(entry.PerSecond, 0f))
-                {
-                    continue;
-                }
-
-                ApplyInstantModifier(new AttributeModifier(
-                    entry.Attribute, AttributeOperation.Add, entry.PerSecond * step));
-            }
-        }
 
         private void EmitIfChanged(
             GameplayAttribute attribute,
@@ -324,10 +331,99 @@ namespace Fofuxo.GameplayAbilitySystem
             float oldValue)
         {
             AttributeValue value = GetOrCreate(attribute);
-            float after = value.CurrentValue;
-            if (!Mathf.Approximately(oldValue, after))
+            float after = CurrentOf(attribute, value);
+            if (Mathf.Approximately(oldValue, after))
             {
-                Changed?.Invoke(new AttributeValueChanged(attribute, oldValue, after, source));
+                return;
+            }
+
+            Changed?.Invoke(new AttributeValueChanged(attribute, oldValue, after, source));
+            EmitCappedChanges(attribute, oldValue, after, source);
+        }
+
+        /// <summary>
+        /// A ceiling that moved moves every attribute it caps. Their bases are
+        /// left alone, so a ceiling that drops and comes back restores them.
+        /// </summary>
+        private void EmitCappedChanges(
+            GameplayAttribute ceilingAttribute,
+            float oldCeiling,
+            float newCeiling,
+            UnityEngine.Object source)
+        {
+            if (caps.Count == 0)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<GameplayAttribute, GameplayAttribute> cap in caps)
+            {
+                if (cap.Value != ceilingAttribute)
+                {
+                    continue;
+                }
+
+                AttributeValue capped = GetOrCreate(cap.Key);
+                float before = Clamp(capped, oldCeiling);
+                float after = Clamp(capped, newCeiling);
+                if (Mathf.Approximately(before, after))
+                {
+                    continue;
+                }
+
+                Changed?.Invoke(new AttributeValueChanged(cap.Key, before, after, source));
+            }
+        }
+
+        private float CurrentOf(GameplayAttribute attribute, AttributeValue value)
+        {
+            return caps.Count == 0 ? value.CurrentValue : Clamp(value, CeilingOf(attribute));
+        }
+
+        private float CeilingOf(GameplayAttribute attribute)
+        {
+            return caps.TryGetValue(attribute, out GameplayAttribute ceiling)
+                ? GetOrCreate(ceiling).CurrentValue
+                : float.PositiveInfinity;
+        }
+
+        private static float Clamp(AttributeValue value, float ceiling)
+        {
+            return Mathf.Max(value.MinValue, Mathf.Min(value.CurrentValue, ceiling));
+        }
+
+        /// <summary>
+        /// A ceiling must be a plain attribute: one that is capped itself would
+        /// make every read walk a chain, and a loop would never end.
+        /// </summary>
+        private void DropChainedCaps()
+        {
+            if (caps.Count == 0)
+            {
+                return;
+            }
+
+            List<GameplayAttribute> chained = null;
+            foreach (KeyValuePair<GameplayAttribute, GameplayAttribute> cap in caps)
+            {
+                if (caps.ContainsKey(cap.Value))
+                {
+                    (chained ??= new List<GameplayAttribute>()).Add(cap.Key);
+                }
+            }
+
+            if (chained == null)
+            {
+                return;
+            }
+
+            foreach (GameplayAttribute attribute in chained)
+            {
+                Debug.LogWarning(
+                    $"Attribute '{attribute}' is capped by '{caps[attribute]}', which is " +
+                    "capped itself. A Max Attribute must be uncapped, so this cap is ignored.",
+                    this);
+                caps.Remove(attribute);
             }
         }
 

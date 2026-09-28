@@ -114,6 +114,7 @@ namespace Fofuxo.GameplayAbilitySystem
             RestoreAttributes(system, record, report);
             RestoreEffects(system, record, resolver, options, offline, report);
             RestoreLooseTags(system, record);
+            system.GrantLoadoutEffects();
             return true;
         }
 
@@ -175,14 +176,12 @@ namespace Fofuxo.GameplayAbilitySystem
                     continue;
                 }
 
-                float cooldown = system.GetCooldownRemaining(ability);
                 bool limited = ability.HasLimitedCharges;
                 float charges = limited ? system.GetCharges(ability) : -1f;
                 system.ChargeRestoreElapsed.TryGetValue(ability, out float restoreElapsed);
 
-                bool remembersSomething =
-                    cooldown > 0f || (limited && charges < ability.MaxCharges);
-                if (!remembersSomething)
+                // Cooldowns are effects and travel with the effects list.
+                if (!limited || charges >= ability.MaxCharges)
                 {
                     continue;
                 }
@@ -197,7 +196,6 @@ namespace Fofuxo.GameplayAbilitySystem
                 entries.Add(new AbilitySaveAbilityEntry
                 {
                     AbilityId = ability.AbilityId,
-                    CooldownRemaining = cooldown,
                     Charges = charges,
                     ChargeRestoreElapsed = restoreElapsed
                 });
@@ -255,6 +253,12 @@ namespace Fofuxo.GameplayAbilitySystem
 
                 if (string.IsNullOrWhiteSpace(definition.EffectId))
                 {
+                    // The loadout grants it again after a restore; nothing is lost.
+                    if (IsGrantedByLoadout(system, definition))
+                    {
+                        continue;
+                    }
+
                     report.Warn(
                         $"'{definition.name}' has no effect id and was not saved; " +
                         "an effect that outlives the frame it lands on needs one.");
@@ -271,12 +275,67 @@ namespace Fofuxo.GameplayAbilitySystem
                     RemainingDuration = effect.IsInfinite ? 0f : effect.RemainingDuration,
                     Period = effect.Period,
                     PeriodAccumulator = effect.PeriodAccumulator,
-                    PeriodCount = effect.PeriodCount
+                    PeriodCount = effect.PeriodCount,
+                    SetByCallerTags = CaptureSetByCallerTags(effect.Spec),
+                    SetByCallerValues = CaptureSetByCallerValues(effect.Spec)
                 });
             }
 
             report.EffectsHandled = entries.Count;
             return entries.ToArray();
+        }
+
+        private static bool IsGrantedByLoadout(AbilitySystem system, GameplayEffectDefinition definition)
+        {
+            if (system.Loadout == null)
+            {
+                return false;
+            }
+
+            IReadOnlyList<GameplayEffectDefinition> granted = system.Loadout.GrantedEffects;
+            for (int i = 0; i < granted.Count; i++)
+            {
+                if (granted[i] == definition)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string[] CaptureSetByCallerTags(GameplayEffectSpec spec)
+        {
+            IReadOnlyDictionary<GameplayTag, float> magnitudes = spec.SetByCallerMagnitudes;
+            if (magnitudes.Count == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            List<string> tags = new(magnitudes.Count);
+            foreach (KeyValuePair<GameplayTag, float> pair in magnitudes)
+            {
+                tags.Add(pair.Key.Value);
+            }
+
+            return tags.ToArray();
+        }
+
+        private static float[] CaptureSetByCallerValues(GameplayEffectSpec spec)
+        {
+            IReadOnlyDictionary<GameplayTag, float> magnitudes = spec.SetByCallerMagnitudes;
+            if (magnitudes.Count == 0)
+            {
+                return Array.Empty<float>();
+            }
+
+            List<float> values = new(magnitudes.Count);
+            foreach (KeyValuePair<GameplayTag, float> pair in magnitudes)
+            {
+                values.Add(pair.Value);
+            }
+
+            return values.ToArray();
         }
 
         private static string[] CaptureLooseTags(AbilitySystem system)
@@ -333,28 +392,15 @@ namespace Fofuxo.GameplayAbilitySystem
                 {
                     report.Warn(
                         $"Ability '{entry.AbilityId}' is in the record and not in the " +
-                        "loadout; its cooldown and charges were dropped.");
+                        "loadout; its charges were dropped.");
                     continue;
                 }
 
-                float cooldown = AgeCooldown(entry.CooldownRemaining, options, offline);
-                system.RestoreCooldown(ability, cooldown);
-                RestoreCharges(system, ability, entry, options, offline, cooldown);
+                RestoreCharges(system, ability, entry, options, offline);
                 restored++;
             }
 
             report.AbilitiesHandled = restored;
-        }
-
-        private static float AgeCooldown(
-            float remaining, AbilityRestoreOptions options, double offline)
-        {
-            return options.OfflinePolicy switch
-            {
-                AbilityOfflinePolicy.Expire => 0f,
-                AbilityOfflinePolicy.Advance => (float)Math.Max(0d, remaining - offline),
-                _ => Mathf.Max(0f, remaining)
-            };
         }
 
         private static void RestoreCharges(
@@ -362,8 +408,7 @@ namespace Fofuxo.GameplayAbilitySystem
             AbilityDefinition ability,
             AbilitySaveAbilityEntry entry,
             AbilityRestoreOptions options,
-            double offline,
-            float cooldownRemaining)
+            double offline)
         {
             if (!ability.HasLimitedCharges || !entry.HasCharges)
             {
@@ -392,11 +437,9 @@ namespace Fofuxo.GameplayAbilitySystem
                         ? 0f
                         : (float)(banked - gained * ability.ChargeRestoreTime);
                 }
-                else if (cooldownRemaining <= 0f)
-                {
-                    charges = ability.MaxCharges;
-                    restoreElapsed = 0f;
-                }
+                // A pool that refills when the cooldown ends needs nothing here:
+                // the cooldown effect comes back aged, and the system refills the
+                // pool on the first tick it finds the ability off cooldown.
             }
 
             system.RestoreCharges(ability, charges, restoreElapsed);
@@ -479,6 +522,12 @@ namespace Fofuxo.GameplayAbilitySystem
                     new GameplayEffectSpec(definition, null, system.gameObject, entry.Level)
                         .SetDuration(entry.TotalDuration)
                         .SetPeriod(entry.Period);
+                string[] callerTags = entry.SetByCallerTags;
+                float[] callerValues = entry.SetByCallerValues;
+                for (int i = 0; i < callerTags.Length && i < callerValues.Length; i++)
+                {
+                    spec.SetSetByCallerMagnitude(new GameplayTag(callerTags[i]), callerValues[i]);
+                }
 
                 container.RestoreActiveEffect(
                     spec,

@@ -59,8 +59,14 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class AbilityLoadout : ScriptableObject
     {
         [SerializeField] private AbilityDefinition[] abilities = { };
+        [Tooltip("Granted Gameplay Effects: applied to the owner when its ability system starts, and again after a save is restored if the record did not bring them back — regeneration, passive buffs. Lyra's AbilitySet grants its effects the same way.")]
+        [SerializeField] private GameplayEffectDefinition[] grantedEffects = { };
 
         public IReadOnlyList<AbilityDefinition> Abilities => abilities;
+
+        /// <summary>Effects the owner holds for as long as it has this loadout.</summary>
+        public IReadOnlyList<GameplayEffectDefinition> GrantedEffects =>
+            grantedEffects ?? Array.Empty<GameplayEffectDefinition>();
 
         /// <summary>Whether this ability is granted.</summary>
         public bool Contains(AbilityDefinition ability)

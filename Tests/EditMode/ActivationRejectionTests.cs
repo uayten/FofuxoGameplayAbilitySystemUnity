@@ -100,7 +100,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void CooldownAfterActivation_ReportsOnCooldown()
         {
             TimelineAbilityDefinition ability = NewAbility("test.cooling");
-            SetField(ability, "cooldown", 3600f);
+            TestEffects.SetCooldown(owned, ability, 3600f);
             Grant(ability);
 
             Assert.IsTrue(system.TryActivate(ability, TargetlessContext()));
@@ -133,7 +133,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             });
 
             TimelineAbilityDefinition ability = NewAbility("test.expensive");
-            SetField(ability, "costs", new[] { new AbilityCost(Stamina, 30f) });
+            TestEffects.SetCost(owned, ability, Stamina, 30f);
             Grant(ability);
 
             AssertRejected(
@@ -217,7 +217,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void CanActivate_ReportsTheSameMessageAsTheTypedResult()
         {
             TimelineAbilityDefinition ability = NewAbility("test.cooling");
-            SetField(ability, "cooldown", 3600f);
+            TestEffects.SetCooldown(owned, ability, 3600f);
             Grant(ability);
 
             Assert.IsTrue(system.TryActivate(ability, TargetlessContext()));
@@ -257,7 +257,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void EvaluateActivation_IsSideEffectFree()
         {
             TimelineAbilityDefinition ability = NewAbility("test.untouched");
-            SetField(ability, "cooldown", 3600f);
+            TestEffects.SetCooldown(owned, ability, 3600f);
             SetField(ability, "maxCharges", 2);
             SetField(ability, "chargeRestoreTime", 3600f);
             Grant(ability);
@@ -279,7 +279,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             // matching on the message would have made these indistinguishable
             // to anything but a human.
             TimelineAbilityDefinition cooling = NewAbility("test.cooling");
-            SetField(cooling, "cooldown", 3600f);
+            TestEffects.SetCooldown(owned, cooling, 3600f);
             TimelineAbilityDefinition blocked = NewAbility("test.blocked");
             SetField(blocked, "blockedTags", new[] { Blocking });
             GrantAll(cooling, blocked);

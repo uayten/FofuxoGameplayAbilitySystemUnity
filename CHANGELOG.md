@@ -2,6 +2,126 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-28
+
+### Paying for an ability works the way Unreal's GAS does: with effects
+
+Breaking. Costs, cooldowns and regeneration were fields and timers; they are
+gameplay effects now, and a commit step separates *can pay* from *pay*.
+
+- **Cost Gameplay Effect.** `AbilityDefinition.costs` (`AbilityCost[]`) and the
+  `AbilityCost` type are gone. An ability names an Instant `Cost Gameplay
+  Effect`. `AbilitySystem.CheckCost` refuses when one of its additive modifiers
+  would take an attribute below its minimum (Unreal's `CheckCost`), reported as
+  `InsufficientAttribute` with the attribute, the amount and what is left. The
+  cost is applied through the owner's container, so an owner immune to it pays
+  nothing. The check reuses one spec per ability and allocates nothing after
+  the first call.
+- **Cost Period.** The cost can be paid again every so many seconds while the
+  activation runs — a sprint, a channel. Activation needs the first installment;
+  the first one that cannot be paid ends the activation with the new
+  `Cancel.InsufficientCost`, whatever its cancel policy.
+- **Cooldown Gameplay Effect.** `AbilityDefinition.cooldown` (seconds) is gone.
+  An ability names a Duration effect whose granted tags mean "on cooldown";
+  `IsOnCooldown` looks for those tags, and the new
+  `GetCooldownTimeRemainingAndDuration` reads the effect. The cooldown dictionary
+  over `Time.time` is gone with `RestoreCooldown`.
+- **Commit.** `AbilityCommitPolicy` (`OnActivation`, the old behavior, or
+  `Manual`) and `AbilitySystem.TryCommitAbility`, Unreal's `CommitAbility`:
+  pays the cost, spends a charge and applies an On Commit cooldown. A refused
+  commit ends the activation with the new `Cancel.CommitFailed`.
+  `AbilityInstance.IsCommitted` says whether it happened.
+  `AbilityCooldownStartPolicy.OnActivation` is renamed `OnCommit` (same value);
+  `OnCompletion` applies the cooldown only to a committed activation.
+- **Set By Caller.** `GameplayEffectMagnitude` gains a `Set By Caller` tag: its
+  flat part is then read from the spec (`GameplayEffectSpec.SetSetByCallerMagnitude`
+  / `GetSetByCallerMagnitude`) instead of `Base Value`. An ability fills those
+  numbers in the new `AbilityDefinition.ConfigureOutgoingSpec`, which runs on
+  every spec it makes for its cost, its cooldown and its Active Effects.
+- **`AbilityDefinition.CanActivateAbility`**, Unreal's override point for the
+  same question: a derived ability refuses to start on a rule of its own. Asked
+  last, side-effect free, reported as the new
+  `AbilityActivationRejection.ConditionNotMet`.
+- **Active Effects** on every ability: Duration or Infinite effects applied to
+  the owner on activation and removed, by handle, when it ends. An Instant one
+  fails validation.
+- **Ongoing Tag Requirements.** `GameplayEffectDefinition` gains `Ongoing
+  Required Tags` and `Ongoing Blocked Tags`. An applied effect that fails them
+  is inhibited (`ActiveGameplayEffect.IsInhibited`): it stays applied, its
+  duration runs and its tags stay, but it contributes no modifiers and runs no
+  periods until the tags allow it. Checked on application and every tick.
+- **Regeneration is an effect.** `AttributeSet.Regeneration`, the
+  `regeneration` arrays on `AttributeSet` and `AttributeSetDefinition`, and
+  `AttributeSet.Tick` are gone. Regeneration is an infinite periodic effect,
+  switched off by its Ongoing Tag Requirements.
+- **Granted Effects.** `AbilityLoadout` gains `Granted Effects`, applied when the
+  ability system starts and again after a restore that did not carry them, never
+  twice — how Lyra's AbilitySet grants effects. `GameplayEffectContainer.IsActive`
+  gains an overload that takes a definition.
+- **An attribute's ceiling can be another attribute.** `InitialValue` gains
+  `Max Attribute`; when set, `Max Value` is ignored and that attribute's current
+  value caps this one. `GetCurrent` and the change events apply the ceiling, and
+  a ceiling that moves raises a change for what it caps. `Add` and `Multiply`
+  never leave the base above the ceiling; `Override` writes it as given, so a
+  restored save keeps a value whose ceiling comes back with its effects. A
+  ceiling that is capped itself is ignored with a warning. `AttributeSet.Values`
+  still shows the uncapped aggregate. `AttributeSet.GetMinimum` is new.
+- **Persistence, record version 2.** Cooldowns travel as effects, so
+  `AbilitySaveAbilityEntry.CooldownRemaining` is gone and ability entries carry
+  charges only. Effect entries carry their Set By Caller numbers.
+  `AbilitySaveResolver` also resolves an ability's cost, cooldown and Active
+  Effects and the loadout's Granted Effects. A Granted Effect without an id is
+  not reported: the restore grants it again. A version 1 record is refused
+  unless the game registers a migration.
+- `GameplayEffectContainer.Find` uses `TryGetComponent`, so asking an actor
+  that never had an effect allocates nothing in the Editor.
+- The summary of `TryCompleteActiveAbility` said it completes only the primary
+  activation; it completes the named ability wherever it runs, and now says so.
+
+Re-authored: the Melee Combat sample's `GA_Sample_Roll` (1 s) and
+`GA_Sample_Block` (0.6 s) carry their cooldowns as embedded Cooldown Gameplay
+Effects (`Cooldown.Sample.Roll`, `Cooldown.Sample.Block`), and the sample's empty
+`regeneration` lists are gone. What a consumer has to do: give every ability
+with a cooldown a Cooldown Gameplay Effect with a tag of its own, turn every
+`costs` entry into a Cost Gameplay Effect, move every regeneration entry into a
+periodic effect in the loadout's Granted Effects, and re-test cooldown lengths,
+costs and refill rates. Tests: `CostsChargesTests`, `ActivationRejectionTests`,
+`AbilityPersistenceTests`, `AttributeModifierTests`,
+`AttributeSetDefinitionTests`, `AbilityDebuggerModelTests` and
+`AllocationBudgetTests` were adapted, and `AbilityEffectModelTests` is new.
+
+### What an ability type adds comes first in the Inspector
+
+- **The sections of a derived ability type are drawn right under the Ability
+  Id**, before targeting, activation, costs and the rest of what every ability
+  shares, parent before child. They used to come last, under everything common,
+  which buried the parameters that make a sprint a sprint. A base field without
+  a line in the hand-written layout still appears at the bottom.
+
+### Fixed
+
+- **Two `ApplyDynamic` effects on one actor no longer overwrite each other.**
+  Dynamic applications borrow one shared definition per duration and stacking
+  policy, and the stack lookup compared only the definition, so a second
+  dynamic effect on a different attribute refreshed the first and took its
+  modifier away. A stack now also requires the same dynamic modifiers
+  (attributes and operations, in order).
+
+### Compiles without warnings on Unity 6.6
+
+- **Diagnostics default from `Debug.isDebugBuild` in a player.** The
+  `DEVELOPMENT_BUILD` directive is deprecated, so a player now reads the flag at
+  runtime, before any scene loads. The defaults are unchanged: on in the Editor
+  and in development builds, off in a release player.
+- **The Ability Debugger finds actors with the `FindObjectsByType` overload that
+  takes no sort mode.** The list was already sorted by name afterwards, so the
+  order it shows does not change.
+- **`AbilityAnimationPlayer` creates its mixer without `normalizeWeights`**,
+  which Unity marked obsolete and no longer honours.
+- **The Motors boundary test finds its assembly through
+  `CurrentAssemblies.GetLoadedAssemblies()`** instead of
+  `AppDomain.GetAssemblies()`. It checks the same thing.
+
 ## [0.2.0] — 2026-09-28
 
 ### The editor assembly has a namespace, and the types you call explain themselves

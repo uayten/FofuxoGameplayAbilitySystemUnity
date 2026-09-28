@@ -13,6 +13,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
     {
         private const string BuffId = "test.effect.buff";
         private const string AbilityId = "test.ability.slam";
+        private const string CooldownId = "test.effect.cooldown";
 
         private GameObject owner;
         private AbilitySystem system;
@@ -54,15 +55,16 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             Assert.IsTrue(Load(loaded, record, out AbilitySaveReport report));
             Assert.IsFalse(report.HasWarnings, string.Join(" | ", report.Warnings));
 
-            Assert.AreEqual(5f, loaded.GetCooldownRemaining(ability), 0.05f, "cooldown");
+            Assert.AreEqual(2f, loaded.GetCooldownRemaining(ability), 0.05f,
+                "the cooldown is an effect: it aged with the three seconds before the save");
             Assert.AreEqual(1f, loaded.GetCharges(ability), 0.0001f, "charges");
             Assert.AreEqual(42f, Attributes(loadedOwner).GetBase(Health), 0.0001f, "base value");
             Assert.AreEqual(52f, Attributes(loadedOwner).GetCurrent(Health), 0.0001f,
                 "the restored buff is a live modifier again");
-            Assert.AreEqual(1, Effects(loadedOwner).ActiveEffectCount, "effect count");
+            Assert.AreEqual(2, Effects(loadedOwner).ActiveEffectCount, "the cooldown and the buff");
             Assert.AreEqual(
                 7f,
-                Effects(loadedOwner).ActiveEffects[0].RemainingDuration,
+                Find(loadedOwner, buff).RemainingDuration,
                 0.0001f,
                 "the effect resumes where the save left it");
             Assert.IsTrue(loaded.HasTag(new GameplayTag("State.Rested")), "loose tag");
@@ -113,7 +115,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             Assert.IsTrue(Load(loaded, record, out _));
 
             Assert.AreEqual(5f, loaded.GetCooldownRemaining(ability), 0.05f);
-            Assert.AreEqual(1, Effects(loadedOwner).ActiveEffectCount);
+            Assert.AreEqual(2, Effects(loadedOwner).ActiveEffectCount, "the cooldown and the buff");
         }
 
         [Test]
@@ -128,7 +130,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             Assert.AreEqual(1f, loaded.GetCooldownRemaining(ability), 0.05f);
             Assert.AreEqual(
                 6f,
-                Effects(loadedOwner).ActiveEffects[0].RemainingDuration,
+                Find(loadedOwner, buff).RemainingDuration,
                 0.0001f);
         }
 
@@ -240,7 +242,8 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         [Test]
         public void AnAbilityThatLeftTheLoadoutIsNamed_NotRestoredSilently()
         {
-            TimelineAbilityDefinition ability = NewAbility(AbilityId, cooldown: 5f);
+            // Charges are what an ability entry still carries; a cooldown travels as an effect.
+            TimelineAbilityDefinition ability = NewAbility(AbilityId, maxCharges: 2);
             Grant(system, ability);
             SpendOneActivation(system, ability);
             AbilitySaveRecord record = AbilityPersistence.Capture(system);
@@ -333,6 +336,51 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             }
         }
 
+        [Test]
+        public void SetByCallerMagnitudes_TravelWithTheirEffect()
+        {
+            GameplayTag data = new("Data.Test.Amount");
+            GameplayEffectDefinition buff = NewEffect(
+                GameplayEffectDurationPolicy.Duration,
+                new[]
+                {
+                    new GameplayEffectModifier(
+                        Health, AttributeOperation.Add, new GameplayEffectMagnitude(0f).WithSetByCaller(data))
+                },
+                10f);
+            buff.SetEffectIdForTests(BuffId);
+            Effects(owner).Apply(
+                new GameplayEffectSpec(buff, owner, owner).SetSetByCallerMagnitude(data, -25f));
+            Assert.AreEqual(75f, attributes.GetCurrent(Health), 0.0001f);
+
+            AbilitySaveRecord record = AbilityPersistence.Capture(system);
+            AbilitySystem loaded = NewSession(out GameObject loadedOwner, buff);
+            Assert.IsTrue(Load(loaded, record, out _));
+
+            Assert.AreEqual(75f, Attributes(loadedOwner).GetCurrent(Health), 0.0001f,
+                "without the saved number the restored buff would add zero");
+        }
+
+        [Test]
+        public void LoadoutEffects_AreGrantedAgain_AfterARestoreThatDidNotCarryThem()
+        {
+            GameplayEffectDefinition passive = NewEffect(
+                GameplayEffectDurationPolicy.Infinite, new[] { Add(Health, -5f) }, 0f);
+            passive.name = "GE_Regen_Passive";
+            AbilityLoadout loadout = Own(ScriptableObject.CreateInstance<AbilityLoadout>());
+            SetField(loadout, "grantedEffects", new[] { passive });
+            SetField(system, "loadout", loadout);
+            system.GrantLoadoutEffects();
+            Assert.AreEqual(95f, attributes.GetCurrent(Health), 0.0001f);
+
+            AbilitySaveRecord record = AbilityPersistence.Capture(system, out AbilitySaveReport saved);
+            Assert.IsFalse(saved.HasWarnings, "a loadout effect needs no id: " + string.Join(" | ", saved.Warnings));
+
+            Assert.IsTrue(AbilityPersistence.Restore(system, record, null, out _));
+            Assert.AreEqual(1, Effects(owner).ActiveEffectCount, "granted again, once");
+            Assert.AreEqual(95f, attributes.GetCurrent(Health), 0.0001f);
+        }
+
         // ------------------------------------------------------------ helpers
 
         private AbilitySaveRecord RecordWithCooldownAndBuff(
@@ -415,7 +463,13 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             ability.name = "GA_Test_Save";
             ability.SetAbilityIdForTests(id);
             SetField(ability, "requiresTarget", false);
-            SetField(ability, "cooldown", cooldown);
+            if (cooldown > 0f)
+            {
+                GameplayEffectDefinition cooldownEffect =
+                    Own(TestEffects.Cooldown(null, cooldown, "Cooldown.Test.Slam", CooldownId));
+                SetField(ability, "cooldownGameplayEffect", cooldownEffect);
+            }
+
             SetField(ability, "maxCharges", maxCharges);
             SetField(ability, "chargeRestoreTime", chargeRestore);
 
@@ -423,6 +477,20 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             step.ConfigureForTests(1, 2, 10, 60f);
             ability.SetStepsForTests(new[] { step });
             return ability;
+        }
+
+        private static ActiveGameplayEffect Find(GameObject actor, GameplayEffectDefinition definition)
+        {
+            foreach (ActiveGameplayEffect effect in Effects(actor).ActiveEffects)
+            {
+                if (effect.Definition == definition)
+                {
+                    return effect;
+                }
+            }
+
+            Assert.Fail($"'{definition.name}' is not active.");
+            return null;
         }
 
         private GameplayEffectDefinition NewBuff(

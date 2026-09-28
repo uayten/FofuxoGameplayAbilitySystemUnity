@@ -53,6 +53,14 @@ namespace Fofuxo.GameplayAbilitySystem
         /// <summary>Number of periodic executions this effect has run.</summary>
         public int PeriodCount { get; internal set; }
 
+        /// <summary>
+        /// True while the target fails the effect's Ongoing Tag Requirements.
+        /// An inhibited effect stays applied — its duration still runs and its
+        /// granted tags stay — but it contributes no modifiers and runs no
+        /// periods until the requirements are met again.
+        /// </summary>
+        public bool IsInhibited { get; internal set; }
+
         public bool IsInfinite => float.IsPositiveInfinity(RemainingDuration);
         public bool IsPeriodic => Period > 0f;
         public bool IsExpired => !IsInfinite && RemainingDuration <= 0f;

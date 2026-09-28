@@ -34,8 +34,7 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
         public static void CollectActors(List<AbilitySystem> into)
         {
             into.Clear();
-            into.AddRange(Object.FindObjectsByType<AbilitySystem>(
-                FindObjectsInactive.Include, FindObjectsSortMode.None));
+            into.AddRange(Object.FindObjectsByType<AbilitySystem>(FindObjectsInactive.Include));
             into.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
         }
 

@@ -38,6 +38,7 @@ namespace Fofuxo.GameplayAbilitySystem
             }
 
             AddAbilities(system.Loadout.Abilities);
+            AddEffects(system.Loadout.GrantedEffects);
         }
 
         /// <summary>Builds a resolver from an explicit set of assets.</summary>
@@ -110,6 +111,15 @@ namespace Fofuxo.GameplayAbilitySystem
 
         private void AddEmbeddedEffects(AbilityDefinition ability)
         {
+            // Cooldowns are effects now, and so are an ability's cost and
+            // the effects it holds while active.
+            Register(ability.CooldownGameplayEffect);
+            Register(ability.CostGameplayEffect);
+            foreach (GameplayEffectDefinition active in ability.ActiveEffects)
+            {
+                Register(active);
+            }
+
             if (ability is not TimelineAbilityDefinition timeline)
             {
                 return;

@@ -161,7 +161,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Uayten.FofuxoGameplayAbilitySystem::Fofuxo.GameplayAbilitySystem.AttributeSet
   definition: {fileID: 11400000, guid: 4a59ed50fa51cd34bba35f94c645dbc3, type: 2}
   initialValues: []
-  regeneration: []
 --- !u!114 &5847901686783672998
 MonoBehaviour:
   m_ObjectHideFlags: 0

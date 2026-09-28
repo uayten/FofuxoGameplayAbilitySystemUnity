@@ -115,6 +115,17 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public static readonly GameplayTag CancelFailed = new("Cancel.Failed");
         /// <summary>
+        /// A periodic cost came due and could not be paid — the stamina a
+        /// sprint runs on ran out — so the activation ended whatever its cancel
+        /// policy says.
+        /// </summary>
+        public static readonly GameplayTag CancelInsufficientCost = new("Cancel.InsufficientCost");
+        /// <summary>
+        /// The ability asked to commit and could not: the cost could no longer
+        /// be paid or the cooldown had started in the meantime.
+        /// </summary>
+        public static readonly GameplayTag CancelCommitFailed = new("Cancel.CommitFailed");
+        /// <summary>
         /// The owner is going away — the component was disabled, the
         /// GameObject destroyed, or the scene unloaded — so every activation
         /// ends whatever its cancel policy says.

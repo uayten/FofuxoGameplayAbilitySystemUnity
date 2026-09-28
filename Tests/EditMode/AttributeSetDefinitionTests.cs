@@ -12,8 +12,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void Definition_ProvidesInitialValues()
         {
             AttributeSetDefinition definition = NewDefinition(
-                new[] { new AttributeSet.InitialValue(Health, 40f, 0f, 100f) },
-                new AttributeSet.Regeneration[] { });
+                new[] { new AttributeSet.InitialValue(Health, 40f, 0f, 100f) });
             GameObject owner = new("DefOwner");
             try
             {
@@ -32,8 +31,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         public void SetDefinition_Rebuilds_AndDropsAttachedModifiers()
         {
             AttributeSetDefinition definition = NewDefinition(
-                new[] { new AttributeSet.InitialValue(Health, 100f, 0f, 200f) },
-                new AttributeSet.Regeneration[] { });
+                new[] { new AttributeSet.InitialValue(Health, 100f, 0f, 200f) });
             GameObject owner = new("DefOwner");
             try
             {
@@ -49,8 +47,6 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 set.SetDefinition(definition);
                 Assert.AreEqual(100f, set.GetCurrent(Health));
                 Assert.IsFalse(set.RemoveModifier(slot), "The rebuild dropped the slot.");
-                set.Tick(20f);
-                Assert.AreEqual(100f, set.GetCurrent(Health));
             }
             finally
             {
@@ -80,8 +76,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         }
 
         private static AttributeSetDefinition NewDefinition(
-            AttributeSet.InitialValue[] initials,
-            AttributeSet.Regeneration[] regen)
+            AttributeSet.InitialValue[] initials)
         {
             AttributeSetDefinition definition =
                 ScriptableObject.CreateInstance<AttributeSetDefinition>();
@@ -92,10 +87,6 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
                 if (field.Name == "initialValues")
                 {
                     field.SetValue(definition, initials);
-                }
-                else if (field.Name == "regeneration")
-                {
-                    field.SetValue(definition, regen);
                 }
             }
 

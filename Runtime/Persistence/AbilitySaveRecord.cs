@@ -19,7 +19,13 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class AbilitySaveRecord
     {
         /// <summary>Schema version written by this package today.</summary>
-        public const int CurrentVersion = 1;
+        /// <remarks>
+        /// Version 2 moved cooldowns into the effects list — a cooldown is a
+        /// Cooldown Gameplay Effect — and added Set By Caller magnitudes to
+        /// effect entries. A version 1 record is refused unless the game
+        /// registers a migration for it.
+        /// </remarks>
+        public const int CurrentVersion = 2;
 
         [SerializeField] private int version = CurrentVersion;
         [SerializeField] private long savedAtUtcTicks;
@@ -79,7 +85,6 @@ namespace Fofuxo.GameplayAbilitySystem
     public sealed class AbilitySaveAbilityEntry
     {
         [SerializeField] private string abilityId;
-        [SerializeField] private float cooldownRemaining;
         [SerializeField] private float charges = -1f;
         [SerializeField] private float chargeRestoreElapsed;
 
@@ -88,13 +93,6 @@ namespace Fofuxo.GameplayAbilitySystem
         {
             get => abilityId ?? string.Empty;
             set => abilityId = value;
-        }
-
-        /// <summary>Seconds of cooldown left when the record was taken.</summary>
-        public float CooldownRemaining
-        {
-            get => cooldownRemaining;
-            set => cooldownRemaining = value;
         }
 
         /// <summary>Charges left, or a negative number for an ability with no charge limit.</summary>
@@ -151,6 +149,22 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private float period;
         [SerializeField] private float periodAccumulator;
         [SerializeField] private int periodCount;
+        [SerializeField] private string[] setByCallerTags = Array.Empty<string>();
+        [SerializeField] private float[] setByCallerValues = Array.Empty<float>();
+
+        /// <summary>Tags of the Set By Caller magnitudes the application carried.</summary>
+        public string[] SetByCallerTags
+        {
+            get => setByCallerTags ??= Array.Empty<string>();
+            set => setByCallerTags = value ?? Array.Empty<string>();
+        }
+
+        /// <summary>The numbers set under <see cref="SetByCallerTags"/>, in the same order.</summary>
+        public float[] SetByCallerValues
+        {
+            get => setByCallerValues ??= Array.Empty<float>();
+            set => setByCallerValues = value ?? Array.Empty<float>();
+        }
 
         /// <summary><see cref="GameplayEffectDefinition.EffectId"/> of the effect.</summary>
         public string EffectId

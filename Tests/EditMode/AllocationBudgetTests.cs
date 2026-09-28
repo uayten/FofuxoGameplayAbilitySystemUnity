@@ -25,6 +25,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
         private AttributeSet attributes;
         private TimelineAbilityDefinition ability;
         private AbilityLoadout loadout;
+        private GameplayEffectDefinition cooldown;
         private bool diagnostics;
 
         [SetUp]
@@ -42,7 +43,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             ability = ScriptableObject.CreateInstance<TimelineAbilityDefinition>();
             ability.SetAbilityIdForTests("test.budget");
             SetField(ability, "requiresTarget", false);
-            SetField(ability, "cooldown", 5f);
+            cooldown = TestEffects.SetCooldown(null, ability, 5f);
             AbilityStep step = new();
             step.ConfigureForTests(1, 2, 10, 60f);
             ability.SetStepsForTests(new[] { step });
@@ -59,6 +60,7 @@ namespace Fofuxo.GameplayAbilitySystem.Tests
             Object.DestroyImmediate(owner);
             Object.DestroyImmediate(ability);
             Object.DestroyImmediate(loadout);
+            Object.DestroyImmediate(cooldown);
         }
 
         [Test]

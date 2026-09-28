@@ -89,6 +89,8 @@ namespace Fofuxo.GameplayAbilitySystem
         [SerializeField] private float coefficient;
         [Tooltip("Optional multiplier by effect level (1-100). An empty curve means no level scaling.")]
         [SerializeField] private AnimationCurve byLevel;
+        [Tooltip("Set By Caller: when set, the flat part is the number the applier put on the spec under this tag, not Base Value. How an ability decides a number its effect uses, like the Data. tags of Unreal's GAS.")]
+        [SerializeField] private GameplayTag setByCallerTag;
 
         public GameplayEffectMagnitude(float baseValue)
         {
@@ -98,6 +100,7 @@ namespace Fofuxo.GameplayAbilitySystem
             snapshot = true;
             coefficient = 0f;
             byLevel = null;
+            setByCallerTag = default;
         }
 
         public GameplayEffectMagnitude(
@@ -113,6 +116,7 @@ namespace Fofuxo.GameplayAbilitySystem
             this.snapshot = snapshot;
             this.coefficient = coefficient;
             byLevel = null;
+            setByCallerTag = default;
         }
 
         public float BaseValue => baseValue;
@@ -129,6 +133,20 @@ namespace Fofuxo.GameplayAbilitySystem
         /// active, because it reads an attribute it did not snapshot.
         /// </summary>
         public bool IsLive => CapturesAttribute && !snapshot;
+        /// <summary>
+        /// The tag the flat part is read under from the spec, when the applier
+        /// decides it. Empty means <see cref="BaseValue"/> is the flat part.
+        /// </summary>
+        public GameplayTag SetByCallerTag => setByCallerTag;
+        public bool IsSetByCaller => !setByCallerTag.IsEmpty;
+
+        /// <summary>A copy whose flat part is read from the spec under this tag.</summary>
+        public GameplayEffectMagnitude WithSetByCaller(GameplayTag tag)
+        {
+            GameplayEffectMagnitude magnitude = this;
+            magnitude.setByCallerTag = tag;
+            return magnitude;
+        }
 
         /// <summary>
         /// The level curve's value at a level, or one when no curve was
@@ -148,7 +166,9 @@ namespace Fofuxo.GameplayAbilitySystem
         /// </summary>
         public float Evaluate(GameplayEffectSpec spec)
         {
-            float value = baseValue;
+            float value = setByCallerTag.IsEmpty
+                ? baseValue
+                : spec != null ? spec.GetSetByCallerMagnitude(setByCallerTag) : 0f;
             if (CapturesAttribute && spec != null)
             {
                 value += coefficient * spec.GetCapturedAttribute(capture, attribute, snapshot);

@@ -11,7 +11,8 @@ with one minor version of warning.
 
 ## Table of contents
 
-- [Unreleased](#unreleased)
+- [0.3.0](#030)
+- [0.2.0](#020)
 - [Cues](#cues)
 - [Hit reaction and damage](#hit-reaction-and-damage)
 - [Timelines and abilities](#timelines-and-abilities)
@@ -20,7 +21,40 @@ with one minor version of warning.
 - [Targeting](#targeting)
 - [Cancellation](#cancellation)
 
-## Unreleased
+## 0.3.0
+
+**Paying for an ability is effects.** The fields and timers are gone; the
+compiler and the Inspector point at every place that used them.
+
+- **`costs` → `Cost Gameplay Effect`.** Author an Instant effect with one
+  additive modifier per `AbilityCost` entry (a negative amount on the same
+  attribute) and assign it to the ability. For a sprint or a channel that paid
+  per second, set `Cost Period` and make the modifier one installment: the
+  amount per second times the period.
+- **`cooldown` → `Cooldown Gameplay Effect`.** Author a Duration effect with the
+  old length and a granted tag of its own (`Cooldown.<Owner>.<Ability>`), and
+  give it an `effectId` if you save. Code that read `RestoreCooldown` or the
+  cooldown dictionary reads `GetCooldownTimeRemainingAndDuration`; save code
+  that wrote `CooldownRemaining` needs nothing, the cooldown travels as an
+  effect.
+- **`AttributeSet.Regeneration` and the `regeneration` arrays → an effect.**
+  Author an Infinite effect with a period and an additive modifier, put it in
+  the loadout's `Granted Effects`, and use `Ongoing Blocked Tags` for whatever
+  used to pause the regeneration. Remove calls to `AttributeSet.Tick`.
+- **`AbilityCooldownStartPolicy.OnActivation` is `OnCommit`.** Same value,
+  authored assets keep working; code that names it has to be renamed.
+- **An ability that computes its own numbers** overrides
+  `ConfigureOutgoingSpec` and fills Set By Caller magnitudes, instead of
+  reading its own fields at payment time.
+- **Saves are record version 2.** A version 1 record is refused unless the game
+  registers an `IAbilitySaveMigration` from version 1 with
+  `AbilitySaveMigrator`; before 1.0 the simplest path
+  is to let the game discard it.
+
+Re-test cooldown lengths, costs and refill rates afterwards: the numbers move
+from the ability into effects, and a missed one fails quietly as "free".
+
+## 0.2.0
 
 **The editor assembly moved into `Fofuxo.GameplayAbilitySystem.Editor`.** Its
 public types used to sit in the global namespace. If your project referenced one

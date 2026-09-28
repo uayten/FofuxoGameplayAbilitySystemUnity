@@ -20,6 +20,7 @@ namespace Fofuxo.GameplayAbilitySystem
         private readonly List<GameplayEffectModifier> dynamicModifiers = new();
         private readonly List<GameplayTag> grantedTags = new();
         private readonly Dictionary<CaptureKey, float> snapshots = new();
+        private Dictionary<GameplayTag, float> setByCallerMagnitudes;
 
         private float durationOverride = -1f;
         private float periodOverride = -1f;
@@ -175,6 +176,35 @@ namespace Fofuxo.GameplayAbilitySystem
             return AddDynamicModifier(
                 new GameplayEffectModifier(attribute, operation, magnitude));
         }
+
+        /// <summary>
+        /// Sets the number a Set By Caller magnitude reads under this tag, the
+        /// way an ability tells its effect how much — how fast a sprint goes,
+        /// how much each installment of its cost takes. Set before the spec is
+        /// applied; a magnitude whose tag was never set reads zero.
+        /// </summary>
+        public GameplayEffectSpec SetSetByCallerMagnitude(GameplayTag tag, float magnitude)
+        {
+            if (!tag.IsEmpty)
+            {
+                (setByCallerMagnitudes ??= new Dictionary<GameplayTag, float>())[tag] = magnitude;
+            }
+
+            return this;
+        }
+
+        /// <summary>The number set under this tag, or <paramref name="fallback"/> when none was.</summary>
+        public float GetSetByCallerMagnitude(GameplayTag tag, float fallback = 0f)
+        {
+            return setByCallerMagnitudes != null &&
+                   setByCallerMagnitudes.TryGetValue(tag, out float magnitude)
+                ? magnitude
+                : fallback;
+        }
+
+        /// <summary>Every Set By Caller number on this spec, for persistence and tooling.</summary>
+        public IReadOnlyDictionary<GameplayTag, float> SetByCallerMagnitudes =>
+            setByCallerMagnitudes ??= new Dictionary<GameplayTag, float>();
 
         /// <summary>Grants a tag for this application only, on top of the authored ones.</summary>
         public GameplayEffectSpec AddGrantedTag(GameplayTag tag)
