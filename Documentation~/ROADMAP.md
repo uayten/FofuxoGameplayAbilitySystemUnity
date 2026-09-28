@@ -210,9 +210,12 @@ Acceptance criteria:
 - No game-specific type dependencies in runtime or editor assemblies — pinned by
   `PackageBoundaryTests`.
 - Public API changes are documented and covered by migration guidance.
-- **A real consumer project uses every core subsystem.** BossRush uses all of
-  them except persistence, which is built and unused until the day/night
-  ability that reads the elapsed time exists. That ability is the last gate.
+- **Real consumer projects use every core subsystem.** BossRush uses all of
+  them except persistence. The development host saves with it: a player's
+  cooldowns, attribute values, costs and granted regeneration survive a real
+  session closed and reopened under the `Freeze` policy. What no consumer uses
+  yet is `Advance` and `Expire`, which wait on the day/night ability that reads
+  the elapsed time.
 
 ## Blocked on a consumer
 
@@ -252,10 +255,11 @@ nothing below is a bug report - it is the list of what has never been played.
 - **The profiling scene**, `Scenes/Profiling.unity`: raise `Pair Count` until the
   frame rate moves, and read the counters against
   [`PERFORMANCE.md`](PERFORMANCE.md).
-- **Persistence, once a game saves with it.** The round trip, the three offline
-  policies and the migration chain are covered by tests; what no test covers is
-  a real session closed and reopened, which only exists when the day/night
-  ability does.
+- **Persistence under `Advance` and `Expire`.** The round trip, the three
+  offline policies and the migration chain are covered by tests, and a real
+  session closed and reopened has been played under `Freeze`. The two policies
+  that charge the time spent closed have not, and only will when the day/night
+  ability exists.
 
 ## Non-goals
 

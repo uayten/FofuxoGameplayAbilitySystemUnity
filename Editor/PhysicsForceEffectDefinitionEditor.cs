@@ -28,6 +28,7 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
 
         public override void OnInspectorGUI()
         {
+            DrawSaveBar();
             DrawNamingViolation();
             DrawDefaultInspector();
             DrawEffectValidation();

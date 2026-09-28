@@ -26,6 +26,8 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
         /// </summary>
         private readonly HashSet<string> handledProperties = new();
 
+        private const string SaveButtonLabel = "Save Ability";
+
         private bool embeddedEffectsExpanded = true;
         private UnityEditor.Editor previewClipEditor;
         private AnimationClip previewClipEditorTarget;
@@ -45,33 +47,13 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
         private void OnDisable()
         {
             DestroyPreviewClipEditor();
-            WarnIfLeavingUnsavedChanges();
-        }
-
-        private void WarnIfLeavingUnsavedChanges()
-        {
-            AbilityDefinition ability = target as AbilityDefinition;
-            if (ability == null)
-            {
-                return;
-            }
-
-            string assetPath = AssetDatabase.GetAssetPath(ability);
-            if (string.IsNullOrEmpty(assetPath) || !HasUnsavedChanges(ability, assetPath))
-            {
-                return;
-            }
-
-            Debug.LogWarning(
-                $"'{ability.name}' still has unsaved changes. Select it again and " +
-                "press Save Ability, or press Ctrl+S, before a domain reload discards them.",
-                ability);
+            AssetSaveBar.WarnIfLeavingUnsavedChanges(target, SaveButtonLabel);
         }
 
         public override void OnInspectorGUI()
         {
             AbilityDefinition ability = (AbilityDefinition)target;
-            DrawSaveBar(ability);
+            AssetSaveBar.Draw(ability, SaveButtonLabel);
             DrawNamingViolations(ability);
 
             serializedObject.Update();
@@ -403,46 +385,6 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
         }
 
         /// <summary>
-        /// Inspector edits only raise a dirty flag. A domain reload -- entering or
-        /// leaving play mode, recompiling, or restarting the Editor -- reloads the
-        /// asset from disk and drops whatever was never written, so the ability
-        /// needs an explicit save that does not depend on saving the scene.
-        /// </summary>
-        private static void DrawSaveBar(AbilityDefinition ability)
-        {
-            string assetPath = AssetDatabase.GetAssetPath(ability);
-            if (string.IsNullOrEmpty(assetPath))
-            {
-                return;
-            }
-
-            bool dirty = HasUnsavedChanges(ability, assetPath);
-
-            using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField(
-                    dirty ? "Unsaved changes" : "Saved",
-                    dirty ? EditorStyles.boldLabel : EditorStyles.label);
-
-                using (new EditorGUI.DisabledScope(!dirty))
-                {
-                    if (GUILayout.Button("Save Ability", GUILayout.Width(110f)))
-                    {
-                        SaveAbility(ability, assetPath);
-                    }
-                }
-            }
-
-            if (dirty && EditorApplication.isPlayingOrWillChangePlaymode)
-            {
-                EditorGUILayout.HelpBox(
-                    "Edited during play mode. Leaving play mode reloads this asset " +
-                    "from disk and discards the change unless it is saved first.",
-                    MessageType.Warning);
-            }
-        }
-
-        /// <summary>
         /// Reports the ability's own name and the name of every effect embedded in
         /// it. The embedded ones have no Inspector of their own, so this is the only
         /// place they are ever seen.
@@ -464,42 +406,6 @@ namespace Fofuxo.GameplayAbilitySystem.Editor
                     AssetNamingConvention.DrawViolationBox(embedded);
                 }
             }
-        }
-
-        private static bool HasUnsavedChanges(AbilityDefinition ability, string assetPath)
-        {
-            if (EditorUtility.IsDirty(ability))
-            {
-                return true;
-            }
-
-            foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
-            {
-                if (embedded != null && embedded != ability && EditorUtility.IsDirty(embedded))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Writes the ability and its embedded effects, which live as sub-assets of
-        /// the same file and can be dirty on their own.
-        /// </summary>
-        private static void SaveAbility(AbilityDefinition ability, string assetPath)
-        {
-            EditorUtility.SetDirty(ability);
-            foreach (Object embedded in AssetDatabase.LoadAllAssetsAtPath(assetPath))
-            {
-                if (embedded != null && embedded != ability)
-                {
-                    EditorUtility.SetDirty(embedded);
-                }
-            }
-
-            AssetDatabase.SaveAssetIfDirty(ability);
         }
 
         private static void DrawValidation(AbilityDefinition ability)

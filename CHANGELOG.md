@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-28
+
+### A standalone effect asset has a save button
+
+- **The gameplay effect Inspector draws the same save bar as the ability
+  Inspector**: the saved state, a **Save Effect** button, a warning when the
+  edit happened in play mode, and a console warning when the Inspector is left
+  with unsaved changes. Only a standalone effect gets it; an embedded one is
+  saved with its ability, by the ability's bar. A subclass Inspector calls
+  `DrawSaveBar()`, as `PhysicsForceEffectDefinitionEditor` now does. The bar is
+  one internal `AssetSaveBar` shared by both Inspectors instead of a copy in
+  each.
+- **The roadmap records the first real persistence session.** A consumer saves
+  with the package and a closed-and-reopened session keeps its state under
+  `Freeze`; `Advance` and `Expire` are still unplayed.
+
 ## [0.3.0] — 2026-09-28
 
 ### Paying for an ability works the way Unreal's GAS does: with effects
