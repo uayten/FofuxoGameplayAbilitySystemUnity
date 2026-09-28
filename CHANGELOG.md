@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-28
+
 ### The editor assembly has a namespace, and the types you call explain themselves
 
 Two of the three things the `1.0` milestone still wanted.

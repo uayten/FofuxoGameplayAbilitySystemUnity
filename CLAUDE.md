@@ -8,8 +8,9 @@
 Public Unity package, id `com.uayten.fofuxogameplayabilitysystem`, namespace
 `Fofuxo.GameplayAbilitySystem`, Unity `6000.6` or newer.
 
-A few sections below apply only to the copy vendored inside BossRush and are
-marked **[BossRush]**. Everything else holds in the standalone repository too.
+A few sections below apply only to BossRush, a consumer that keeps the GAS
+skills and the characters built on the package, and are marked **[BossRush]**.
+Everything else holds in the standalone repository too.
 
 ## Scope
 
@@ -250,7 +251,7 @@ value each.
 ## Verification
 
 - The standalone package repository is not a Unity project; use a host project
-  to compile and run tests. **[BossRush]** BossRush is that host.
+  to compile and run tests. MyDragonShop is that host (see Development host).
 - Prefer focused EditMode tests over broad PlayMode sessions.
 - Do not enter Play Mode unless the requested behavior requires interactive
   validation. Gameplay, animation and viewport feel are Antonio's to test.
@@ -287,10 +288,16 @@ same change instead of preserving instructions that describe an older version.
   without the `AbilityDiagnostics.Enabled` guard, and editor tooling that
   re-implements a rule `TryValidate` or `EvaluateActivation` already owns.
 
-## Port-back **[BossRush]**
+## Development host
 
-This folder has no `.git`. Changes are recorded only by a BossRush commit until
-copied by hand into `uayten/FofuxoGameplayAbilitySystemUnity`. Port at
-milestones; the pre-vendoring snapshot at
-`C:\Users\ant7a\OneDrive\Documentos\UnityPackages\` must survive until the first
-port-back is done.
+The package is developed inside MyDragonShop, where this repository is a git
+submodule at `Packages/com.uayten.fofuxogameplayabilitysystem`. Unity treats it
+as an embedded package, so it is editable there; commits and tags are made in
+the submodule and pushed here, and MyDragonShop commits the submodule pointer.
+
+Every other project, BossRush included, consumes a tagged release by git URL
+(`https://github.com/uayten/FofuxoGameplayAbilitySystemUnity.git#vX.Y.Z`) and
+is read-only there. To release: move `[Unreleased]` in `CHANGELOG.md` under a
+version heading, bump `version` in `package.json` to match, commit, tag
+`vX.Y.Z`, and push the branch and the tag. A consumer picks it up by changing
+the tag in its `Packages/manifest.json`.
